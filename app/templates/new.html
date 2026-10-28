@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}New exhibitors · Show Tracker{% endblock %}
+{% block content %}
+<p class="eyebrow">Tracking // New exhibitors</p>
+<div class="titlerow">
+  <h1>New exhibitors</h1>
+  <div class="actions"><a class="btn ghost" href="{{ url_for('export_csv', days=days) }}">Export CSV</a></div>
+</div>
+<p class="lede">Companies that appeared on a show's list since tracking began, newest first. The first check of each show is the baseline and isn't counted.</p>
+
+<div class="filters">
+  {% for d in [1, 7, 30, 90] %}
+    <a class="chip {{ 'on' if days == d }}" href="{{ url_for('new_feed', days=d) }}">{{ 'Last 24 h' if d == 1 else 'Last ' ~ d ~ ' days' }}</a>
+  {% endfor %}
+  <span class="count mono">{{ rows|length }} found</span>
+</div>
+
+{% if rows %}
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Company</th><th>Show</th><th>Booth</th><th>Website</th><th>Seen</th><th>Also at</th><th>Sent to Clay</th></tr></thead>
+  <tbody>
+  {% for e in rows %}
+    <tr>
+      <td class="name">{% if e.profile_url %}<a href="{{ e.profile_url }}" target="_blank" rel="noopener">{{ e.name }}</a>{% else %}{{ e.name }}{% endif %}</td>
+      <td><a href="{{ url_for('show_page', show_id=e.show_id, view='new') }}">{{ e.show_name }}</a>{% if e.show_date %}<small>{{ e.show_date|nicedate }}</small>{% endif %}</td>
+      <td class="mono">{{ e.booth or '–' }}</td>
+      <td class="mono">{% if e.website %}<a href="{{ e.website if '://' in e.website else 'https://' ~ e.website }}" target="_blank" rel="noopener">{{ e.website.split('://')[-1].rstrip('/') }}</a>{% else %}–{% endif %}</td>
+      <td class="mono muted">{{ e.first_seen_at|ago }}</td>
+      <td class="mono">{% if e.other_shows %}{{ e.other_shows }} other show{{ 's' if e.other_shows != 1 }}{% else %}–{% endif %}</td>
+      <td class="mono muted">{{ e.pushed_at|nicedate if e.pushed_at else '–' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">Nothing new in this window yet. Once a tracked show adds exhibitors after its first check, they'll appear here.</p>
+{% endif %}
+{% endblock %}
