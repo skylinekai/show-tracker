@@ -106,10 +106,36 @@ CREATE TABLE IF NOT EXISTS contacts (
     created_at TEXT NOT NULL,
     UNIQUE (company_id, linkedin_url)
 );
+CREATE TABLE IF NOT EXISTS industries (
+    id {pk},
+    name TEXT NOT NULL UNIQUE,
+    keywords TEXT,
+    am_industries TEXT,
+    locations TEXT,
+    min_employees INTEGER,
+    owner_id INTEGER,
+    prospecting INTEGER NOT NULL DEFAULT 0,
+    auto_send INTEGER NOT NULL DEFAULT 0,
+    sequence_id TEXT,
+    created_at TEXT NOT NULL,
+    last_search_at TEXT,
+    last_search_count INTEGER,
+    search_page INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS industry_companies (
+    id {pk},
+    industry_id INTEGER NOT NULL REFERENCES industries(id) ON DELETE CASCADE,
+    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    stage TEXT,
+    score INTEGER,
+    score_notes TEXT,
+    found_at TEXT NOT NULL,
+    UNIQUE (industry_id, company_id)
+);
 CREATE TABLE IF NOT EXISTS leads (
     id {pk},
-    exhibitor_id INTEGER NOT NULL REFERENCES exhibitors(id) ON DELETE CASCADE,
-    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    exhibitor_id INTEGER REFERENCES exhibitors(id) ON DELETE CASCADE,
+    show_id INTEGER REFERENCES shows(id) ON DELETE CASCADE,
     company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'review',
@@ -143,6 +169,53 @@ CREATE TABLE IF NOT EXISTS discovered_shows (
     status TEXT NOT NULL DEFAULT 'suggested',
     UNIQUE (name)
 );
+CREATE TABLE IF NOT EXISTS company_shows (
+    id {pk},
+    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    show_name TEXT NOT NULL,
+    start_date TEXT,
+    location TEXT,
+    stand_sqm REAL,
+    source_url TEXT,
+    found_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS show_files (
+    id {pk},
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    data {blob} NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    uploaded_by INTEGER,
+    extracted TEXT,
+    extracted_at TEXT,
+    error TEXT
+);
+CREATE TABLE IF NOT EXISTS stand_history (
+    id {pk},
+    exhibitor_id INTEGER NOT NULL REFERENCES exhibitors(id) ON DELETE CASCADE,
+    old_sqft INTEGER,
+    new_sqft INTEGER,
+    changed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS opportunities (
+    id {pk},
+    kind TEXT NOT NULL,
+    name_key TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    show_id INTEGER,
+    exhibitor_id INTEGER,
+    industry_id INTEGER,
+    owner_id INTEGER,
+    detail TEXT,
+    sqm REAL,
+    prev_sqm REAL,
+    value_low INTEGER,
+    value_high INTEGER,
+    status TEXT NOT NULL DEFAULT 'new',
+    found_at TEXT NOT NULL,
+    acted_at TEXT,
+    UNIQUE (kind, name_key, show_id)
+);
 CREATE TABLE IF NOT EXISTS activity (
     id {pk},
     kind TEXT NOT NULL,
@@ -173,6 +246,35 @@ MIGRATIONS = [
     ("exhibitors", "alerted_at", "TEXT"),
     ("users", "job_title", "TEXT"),
     ("users", "phone", "TEXT"),
+    ("users", "mailbox", "TEXT"),
+    ("users", "sequence_id", "TEXT"),
+    ("users", "briefing", "INTEGER NOT NULL DEFAULT 1"),
+    ("shows", "owner_id", "INTEGER"),
+    ("leads", "owner_id", "INTEGER"),
+    ("activity", "user_id", "INTEGER"),
+    ("companies", "revenue_usd", "BIGINT"),
+    ("companies", "total_funding", "TEXT"),
+    ("companies", "funding_stage", "TEXT"),
+    ("companies", "funding_date", "TEXT"),
+    ("companies", "founded_year", "INTEGER"),
+    ("companies", "overview", "TEXT"),
+    ("companies", "open_roles", "INTEGER"),
+    ("companies", "marketing_roles", "TEXT"),
+    ("companies", "web_research", "TEXT"),
+    ("companies", "web_researched_at", "TEXT"),
+    ("companies", "growing", "TEXT"),
+    ("companies", "am_company_id", "TEXT"),
+    ("shows", "industry_id", "INTEGER"),
+    ("leads", "industry_id", "INTEGER"),
+    ("discovered_shows", "industry_id", "INTEGER"),
+    ("shows", "auto_send_new", "INTEGER NOT NULL DEFAULT 1"),
+    ("opportunities", "sent_to", "INTEGER"),
+    ("opportunities", "sent_on", "TEXT"),
+    ("opportunities", "research_stage", "TEXT"),
+    ("opportunities", "score", "INTEGER"),
+    ("opportunities", "score_notes", "TEXT"),
+    ("opportunities", "contacts_found", "INTEGER"),
+    ("opportunities", "researched_at", "TEXT"),
 ]
 
 
@@ -185,6 +287,9 @@ class Conn:
 
     def execute(self, sql: str, params: tuple | list = ()):
         cur = self.raw.cursor()
+        if IS_PG:
+            import psycopg2
+            params = [psycopg2.Binary(p) if isinstance(p, (bytes, bytearray)) else p for p in params]
         cur.execute(self._sql(sql), tuple(params))
         return cur
 
@@ -230,15 +335,40 @@ def connect():
 
 def init_db() -> None:
     pk = "SERIAL PRIMARY KEY" if IS_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    blob = "BYTEA" if IS_PG else "BLOB"
     with _lock:
         with connect() as db:
-            for stmt in SCHEMA.format(pk=pk).split(";"):
+            for stmt in SCHEMA.format(pk=pk, blob=blob).split(";"):
                 if stmt.strip():
                     db.execute(stmt)
         for table, column, decl in MIGRATIONS:
             with connect() as db:
                 if column not in _columns(db, table):
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        _relax_leads()
+
+
+def _relax_leads() -> None:
+    """Early versions required every lead to have a show. Industry campaigns don't, so drop that rule."""
+    with connect() as db:
+        if IS_PG:
+            db.execute("ALTER TABLE leads ALTER COLUMN show_id DROP NOT NULL")
+            db.execute("ALTER TABLE leads ALTER COLUMN exhibitor_id DROP NOT NULL")
+            return
+        info = {r["name"]: r for r in db.all("PRAGMA table_info(leads)")}
+        if not info["show_id"]["notnull"]:
+            return
+        create = db.one("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'leads'")["sql"]
+        create = create.replace("exhibitor_id INTEGER NOT NULL", "exhibitor_id INTEGER") \
+                       .replace("show_id INTEGER NOT NULL", "show_id INTEGER") \
+                       .replace("CREATE TABLE leads", "CREATE TABLE leads_new", 1)
+        cols = ", ".join(info)
+        db.execute("PRAGMA foreign_keys = OFF")
+        db.execute(create)
+        db.execute(f"INSERT INTO leads_new ({cols}) SELECT {cols} FROM leads")
+        db.execute("DROP TABLE leads")
+        db.execute("ALTER TABLE leads_new RENAME TO leads")
+        db.execute("CREATE INDEX IF NOT EXISTS ix_leads_status ON leads(status)")
 
 
 def _columns(db: Conn, table: str) -> set[str]:
@@ -248,8 +378,8 @@ def _columns(db: Conn, table: str) -> set[str]:
     return {r["name"] for r in db.all(f"PRAGMA table_info({table})")}
 
 
-def log_activity(kind: str, message: str, ref: str | None = None) -> None:
-    """Short entries for the activity feed and daily briefing."""
+def log_activity(kind: str, message: str, ref: str | None = None, user_id: int | None = None) -> None:
+    """Short entries for the activity feed and daily briefing. user_id = whose work it's about (None = team)."""
     with connect() as db:
-        db.execute("INSERT INTO activity (kind, message, ref, created_at) VALUES (?, ?, ?, ?)",
-                   (kind, message[:500], ref, now()))
+        db.execute("INSERT INTO activity (kind, message, ref, created_at, user_id) VALUES (?, ?, ?, ?, ?)",
+                   (kind, message[:500], ref, now(), user_id))

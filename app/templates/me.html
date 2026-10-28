@@ -3,7 +3,7 @@
 {% block content %}
 <section class="card">
   <h2>Your details</h2>
-  <p class="sub">You sign in as {{ user.email }}.</p>
+  <p class="sub">You sign in as {{ user.email }}. Your name, job title and number are sent with your outreach for the email sign-off.</p>
   <form method="post">
     {{ csrf_field }}<input type="hidden" name="form" value="details">
     <div class="grid3">
@@ -12,6 +12,43 @@
       <label>Contact number <span class="req">*</span><input name="phone" type="tel" value="{{ user.phone or '' }}" required></label>
     </div>
     <div class="formrow"><button type="submit">Save details</button></div>
+  </form>
+</section>
+
+<section class="card" id="outreach">
+  <h2>Your outreach</h2>
+  <p class="sub">Emails to your prospects go out from your own mailbox, so replies come straight to you.</p>
+  {% if not user.mailbox %}<div class="note warn"><p>Choose your Amplemarket mailbox below. Until you do, your contacts go out from whichever mailbox the sequence uses by default.</p></div>{% endif %}
+  <form method="post">
+    {{ csrf_field }}<input type="hidden" name="form" value="outreach">
+    <div class="grid3">
+      <label>Send from (Amplemarket mailbox)
+        {% if mailboxes %}
+        <select name="mailbox">
+          <option value="">Sequence default</option>
+          {% for m in mailboxes %}<option value="{{ m.email }}" {% if user.mailbox == m.email or (not user.mailbox and suggested and m == suggested[0]) %}selected{% endif %}>{{ m.email }}{% if m.owner_name %} · {{ m.owner_name }}{% endif %}{% if m.status != 'active' %} ({{ m.status|replace('_', ' ') }}){% endif %}</option>{% endfor %}
+        </select>
+        {% else %}
+        <input name="mailbox" type="email" value="{{ user.mailbox or '' }}" placeholder="you@skylinewhitespace.com">
+        {% endif %}
+        <div class="field-help">{% if am_ok %}Mailboxes connected in Amplemarket.{% else %}The mailbox you've connected in Amplemarket.{% endif %}</div></label>
+      <label>Your sequence
+        {% if sequences %}
+        <select name="sequence_id">
+          <option value="">Company default</option>
+          {% for s in sequences %}<option value="{{ s.id }}" {% if user.sequence_id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+        </select>
+        {% else %}<input name="sequence_id" value="{{ user.sequence_id or '' }}" placeholder="Company default">{% endif %}
+        <div class="field-help">Only if you use your own sequence. A show can still override this.</div></label>
+      {% if conf.email_alerts %}<label class="check" style="align-self:center"><input type="checkbox" name="briefing" value="1" {% if user.briefing %}checked{% endif %}>
+        <span>Email me a morning briefing <span class="hint">· {{ conf.briefing_time }}: approvals waiting, replies, new exhibitors</span></span></label>{% else %}<input type="hidden" name="briefing" value="{{ 1 if user.briefing else '' }}">{% endif %}
+    </div>
+    <div class="formrow">
+      <button type="submit">Save</button>
+      {% if conf.email_alerts %}<a class="btn ghost" href="{{ url_for('briefing_preview') }}" target="_blank">Preview my briefing</a>{% endif %}
+      {% if email_ok and conf.email_alerts %}<button type="submit" class="ghost" formaction="{{ url_for('test_briefing') }}">Send me one now</button>{% endif %}
+      {% if am_ok %}<button type="submit" class="link" formaction="{{ url_for('refresh_sequences') }}">Reload from Amplemarket</button>{% endif %}
+    </div>
   </form>
 </section>
 

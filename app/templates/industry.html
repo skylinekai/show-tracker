@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ ind.name }}{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('industries_page') }}">Industries</a></p>
+<div class="titlerow">
+  <div>
+    <h1>{{ ind.name }}</h1>
+    <p class="lede" style="margin-bottom:14px">{{ (ind.keywords or '').splitlines()|select|join(', ') }}{% if ind.locations %} · {{ (ind.locations or '').splitlines()|select|join(', ') }}{% endif %}
+      {% if ind.last_search_at %} · companies last searched {{ ind.last_search_at|ago }}{% endif %}</p>
+  </div>
+  {% if can_manage %}
+  <div class="actions">
+    <form method="post" action="{{ url_for('industry_search', iid=ind.id) }}">{{ csrf_field }}<button class="ghost" {% if not am_ok %}disabled{% endif %}>Find more companies</button></form>
+    <form method="post" action="{{ url_for('industry_find_shows', iid=ind.id) }}">{{ csrf_field }}<button class="ghost" {% if not ai_ok %}disabled{% endif %}>Find {{ ind.name }} shows</button></form>
+  </div>
+  {% endif %}
+</div>
+
+<form class="card" method="post" action="{{ url_for('industry_edit', iid=ind.id) }}">
+  {{ csrf_field }}
+  <div class="switchrow">
+    <div>
+      <h2>Campaign</h2>
+      <p class="sub" style="margin:0">{% if ind.prospecting %}Active: companies are found weekly and the best fits researched within the daily limit.{% else %}Paused. Switch on to start finding and researching {{ ind.name }} companies.{% endif %}
+        {% if owner %} Owner: <b>{{ owner.name or owner.email }}</b>.{% endif %}</p>
+    </div>
+    {% if can_manage %}{% if ind.prospecting %}<label class="switch"><input type="checkbox" name="prospecting" value="1" checked onchange="this.form.submit()"><span></span></label>{% else %}<button name="prospecting" value="1">Start campaign</button>{% endif %}{% endif %}
+  </div>
+  <div class="funnel" style="margin-top:18px">
+    <div><b>{{ total|thousands }}</b><span>companies in this industry</span></div>
+    <div><b>{{ (stages.values()|sum) - (stages.waiting or 0) }}</b><span>assessed</span></div>
+    <div><b>{{ stages.queued or 0 }}</b><span>good fits with contacts</span></div>
+    <div><b>{{ (lead_counts.sent or 0) + (lead_counts.replied or 0) }}</b><span>in sequence · {{ lead_counts.replied or 0 }} replied</span></div>
+  </div>
+  {% if can_manage %}
+  <details style="margin-top:16px"><summary class="btn ghost small">Edit campaign</summary>
+    <div class="grid" style="margin-top:14px">
+      <label>Name <input name="name" value="{{ ind.name }}"></label>
+      <label>Smallest company (employees) <input name="min_employees" type="number" value="{{ ind.min_employees or '' }}" placeholder="{{ conf.min_employees }}"></label>
+      <label>Keywords <textarea name="keywords" rows="3">{{ ind.keywords or '' }}</textarea></label>
+      <label>Where <textarea name="locations" rows="3">{{ ind.locations or '' }}</textarea></label>
+      <label>Amplemarket industries <textarea name="am_industries" rows="2">{{ ind.am_industries or '' }}</textarea></label>
+      <label>Amplemarket sequence
+        <select name="sequence_id"><option value="">Owner's / company default</option>
+          {% for s in sequences %}<option value="{{ s.id }}" {% if ind.sequence_id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+        </select></label>
+      {% if user.is_admin %}<label>Owner <select name="owner_id"><option value="">Up for grabs</option>
+        {% for t in team %}<option value="{{ t.id }}" {% if ind.owner_id == t.id %}selected{% endif %}>{{ display_name(t) }}</option>{% endfor %}</select></label>{% endif %}
+      <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" name="auto_send" value="1" {% if ind.auto_send %}checked{% endif %}><span>Send without approval</span></label>
+      <input type="hidden" name="details" value="1">
+      <div class="full actions"><button type="submit">Save</button></div>
+    </div>
+  </details>
+  {% endif %}
+</form>
+
+<div class="split">
+  <section class="card flush">
+    <div class="cardhead"><h2>Top companies</h2><p class="sub" style="margin:4px 0 0">Ranked by estimated stand spend over the next year. <a href="{{ url_for('companies_page', industry=ind.id, only='all') }}">See all {{ total }}</a></p></div>
+    {% if accounts %}
+    <div class="tablewrap"><table>
+      <thead><tr><th>Company</th><th class="num">Shows</th><th class="num">Biggest stand</th><th class="num">Est. 12 months</th><th class="num">Staff</th><th></th></tr></thead>
+      <tbody>
+      {% for a in accounts[:60] %}
+        <tr data-href="{{ url_for('company_page', key=a.key) }}">
+          <td class="name"><a href="{{ url_for('company_page', key=a.key) }}">{{ a.name }}</a>{% if a.priority %}<span class="tag navy">London/Bham</span>{% endif %}</td>
+          <td class="num">{{ a.show_count or '–' }}</td>
+          <td class="num nowrap">{% if a.best %}{{ '{:,.0f}'.format(a.best.sqm) }} m²{% else %}<span class="faint">–</span>{% endif %}</td>
+          <td class="num nowrap">{{ a.annual|money or '–' }}</td>
+          <td class="num">{{ a.company.employees|thousands if a.company and a.company.employees else '' }}</td>
+          <td class="num">{% if can_manage and a.company %}<form method="post" action="{{ url_for('industry_target', iid=ind.id, company_id=a.company.id) }}">{{ csrf_field }}<button class="ghost small" {% if not am_ok %}disabled{% endif %}>Target now</button></form>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}<p class="muted" style="padding:16px 24px;margin:0">No companies yet. Switch the campaign on, or tag some shows to this industry.</p>{% endif %}
+  </section>
+
+  <aside>
+    {% if can_manage %}
+    <section class="card">
+      <h2>Add a company</h2>
+      <p class="sub">Know one you want? Add it to this campaign, or target it straight away.</p>
+      <form method="post" action="{{ url_for('industry_add_company', iid=ind.id) }}" class="grid" style="grid-template-columns:1fr">
+        {{ csrf_field }}
+        <label>Company name <input name="name" placeholder="e.g. Align Technology"></label>
+        <label>Website <input name="website" placeholder="aligntech.com"></label>
+        <div class="actions"><button name="now" value="1" {% if not am_ok %}disabled{% endif %}>Target now</button><button class="ghost" name="now" value="">Add to campaign</button></div>
+      </form>
+    </section>
+    {% endif %}
+    <section class="card">
+      <h2>{{ ind.name }} shows</h2>
+      {% if shows %}
+      <ul class="activity">{% for s in shows %}<li><span><a href="{{ url_for('show_page', show_id=s.id) }}">{{ s.name }}</a>{% if s.priority %} <span class="tag navy">In-house</span>{% endif %}<br>
+        <span class="small">{{ s.start_date|nicedate }}{% if s.location %} · {{ s.location }}{% endif %} · {{ s.exhibitors }} exhibitors</span></span></li>{% endfor %}</ul>
+      {% else %}<p class="muted">None tagged yet.</p>{% endif %}
+      {% if can_manage and other_shows %}
+      <form method="post" action="{{ url_for('industry_tag_show', iid=ind.id) }}" class="formrow">
+        {{ csrf_field }}
+        <select name="show_id" style="margin:0;flex:1">{% for s in other_shows %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+        <button class="ghost small">Add show</button>
+      </form>
+      {% endif %}
+    </section>
+    {% if suggested %}
+    <section class="card">
+      <h2>Shows found for {{ ind.name }}</h2>
+      <ul class="activity">{% for s in suggested %}<li><span><b style="font-weight:500">{{ s.name }}</b><br><span class="small">{{ s.start_date|nicedate }}{% if s.location %} · {{ s.location }}{% endif %}</span></span></li>{% endfor %}</ul>
+      <a class="btn ghost small" href="{{ url_for('discover') }}">Review and track</a>
+    </section>
+    {% endif %}
+    {% if can_manage %}
+    <form method="post" action="{{ url_for('industry_delete', iid=ind.id) }}" onsubmit="return confirm('Delete this campaign? Shows stay tracked.')">{{ csrf_field }}<button class="danger small">Delete campaign</button></form>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

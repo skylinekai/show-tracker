@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Opportunities{% endblock %}
+{% block content %}
+<div class="titlerow">
+  <div>
+    <h1>Opportunities</h1>
+    <p class="lede">Companies worth calling before anyone else does: first-time exhibitors, companies taking more space than before, and companies likely to start exhibiting because they've raised money, are hiring events staff or are growing fast. This list keeps itself up to date: new opportunities are found every day and researched in the background (score and contacts), so the best are ready to start.</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="{{ url_for('opportunities_rescan') }}">{{ csrf_field }}<button class="ghost">Refresh now</button></form>
+  </div>
+</div>
+
+<div class="note"><p>
+  <b>{{ progress.ready or 0 }}</b> ready with contacts · <b>{{ progress.queued or 0 }}</b> waiting to be researched
+  {% if not am_ok %}· research starts once Amplemarket is connected{% else %}· up to {{ daily_limit }} a day (Settings → Amplemarket){% endif %}
+  {% if last_scan %}· last search for signals {{ last_scan|ago }}{% endif %}
+</p></div>
+
+<section class="stats">
+  {% for k, (label, desc) in kinds.items() %}
+  <a class="stat" href="{{ url_for('opportunities_page', kind=k) }}" style="text-decoration:none;{% if kind == k %}border-color:var(--navy);box-shadow:inset 0 0 0 1px var(--navy){% endif %}">
+    <b>{{ counts[k] }}</b><span>{{ label }}</span></a>
+  {% endfor %}
+</section>
+
+<div class="chips">
+  <a class="chip {{ 'on' if kind == 'all' and not ready_only }}" href="{{ url_for('opportunities_page', status=status) }}">All</a>
+  <a class="chip {{ 'on' if ready_only }}" href="{{ url_for('opportunities_page', status=status, kind=kind if kind != 'all' else None, ready=None if ready_only else 1) }}">Ready to start</a>
+  {% for k, (label, desc) in kinds.items() %}<a class="chip {{ 'on' if kind == k }}" href="{{ url_for('opportunities_page', kind=k, status=status, ready=1 if ready_only else None) }}">{{ label }}</a>{% endfor %}
+  <span class="grow"></span>
+  {% for st, label in [('new', 'Open'), ('actioned', 'Started'), ('dismissed', 'Dismissed')] %}
+  <a class="chip {{ 'on' if status == st }}" href="{{ url_for('opportunities_page', kind=kind if kind != 'all' else None, status=st) }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if rows %}
+<div class="card flush">
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Company</th><th>Signal</th><th>Where</th><th class="num">Stand</th><th class="num">Est. value</th><th class="num">Score</th><th>Contacts</th><th></th></tr></thead>
+  <tbody>
+  {% for o in rows %}
+    <tr>
+      <td class="name"><a href="{{ url_for('company_page', key=o.name_key) }}">{{ o.company_name }}</a>{% if o.priority %}<span class="tag navy">London/Bham</span>{% endif %}
+        <small>{% if o.company_industry %}{{ o.company_industry }}{% endif %}{% if o.employees %} · {{ o.employees|thousands }} staff{% endif %}{% if o.growing == 'growing' %} · growing{% endif %}</small></td>
+      <td><span class="pill {{ {'upsized': 'ok', 'first_time': 'run', 'funding': 'warn', 'hiring': 'run', 'growing': 'ok'}[o.kind] }} plain">{{ kinds[o.kind][0].rstrip('s') }}</span>
+        <small>{{ o.detail }}</small></td>
+      <td>{% if o.show_name %}{{ o.show_name }}<small>{{ o.show_date|nicedate }}</small>{% elif o.industry_name %}{{ o.industry_name }} campaign{% endif %}</td>
+      <td class="num nowrap">{% if o.sqm %}{{ '{:,.0f}'.format(o.sqm) }} m²{% if o.prev_sqm %}<small>was {{ '{:,.0f}'.format(o.prev_sqm) }} m²</small>{% endif %}{% else %}<span class="faint">–</span>{% endif %}</td>
+      <td class="num nowrap">{% if o.value_high %}{{ (o.value_low, o.value_high)|moneyrange }}{% else %}<span class="faint">–</span>{% endif %}</td>
+      <td class="num" {% if o.score_notes %}title="{{ o.score_notes }}"{% endif %}>{% if o.score is not none %}<b style="font-weight:500">{{ o.score }}</b>{% else %}<span class="faint">–</span>{% endif %}</td>
+      <td class="small" style="min-width:180px">
+        {% set st = o.research_stage %}
+        {% if st == 'ready' %}<span class="pill ok">{{ o.contacts_found }} ready</span>
+          {% for p in o.people %}<small>{{ p.name }}{% if p.title %} · {{ p.title }}{% endif %}</small>{% endfor %}
+        {% elif st is none and o.status == 'new' %}<span class="pill plain">Researching soon</span>
+        {% elif st == 'no_contacts' %}<span class="pill warn">No contacts found</span>
+        {% elif st == 'not_found' %}<span class="pill warn">Company not found</span>
+        {% elif st == 'not_fit' %}<span class="pill plain">Not a fit</span><small>{{ o.score_notes }}</small>
+        {% elif st == 'teammate' %}<span class="pill plain">Teammate's</span><small>{{ o.score_notes }}</small>
+        {% elif st in ('started', 'in_outreach') %}<span class="pill run">In outreach</span>
+        {% endif %}
+      </td>
+      <td class="nowrap">
+        {% if o.status == 'new' %}
+        <div class="actions" style="justify-content:flex-end">
+          {% if st not in ('teammate', 'in_outreach', 'not_fit') %}<form method="post" action="{{ url_for('opportunity_action', oid=o.id, action='start') }}">{{ csrf_field }}<button class="small {{ '' if st == 'ready' else 'ghost' }}" {% if not am_ok %}disabled title="Connect Amplemarket first"{% endif %}>Start outreach</button></form>{% endif %}
+          {% if not o.owner_id %}<form method="post" action="{{ url_for('opportunity_action', oid=o.id, action='claim') }}">{{ csrf_field }}<button class="ghost small">Claim</button></form>{% endif %}
+          <form method="post" action="{{ url_for('opportunity_action', oid=o.id, action='dismiss') }}">{{ csrf_field }}<button class="textbtn">Dismiss</button></form>
+        </div>
+        {% else %}<span class="small">{{ o.owner_name or '' }} · {{ o.acted_at|ago }}</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+<p class="small" style="margin-top:10px">Nothing is emailed from this page. <b>Start outreach</b> writes opening lines for the contacts and puts them in your Outreach queue to approve.</p>
+{% else %}
+<p class="empty">{% if ready_only %}Nothing ready yet. Opportunities are researched in the background, best first.{% elif status == 'new' %}No open opportunities yet. They appear as shows are checked (first-timers and bigger stands) and from the daily search for funding, hiring and growth in your industries.{% else %}Nothing here.{% endif %}</p>
+{% endif %}
+{% endblock %}

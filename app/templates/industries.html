@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Industries{% endblock %}
+{% block content %}
+<h1>Industries</h1>
+<p class="lede">Target a whole industry, not just one show. Each campaign gathers every company in that industry: exhibitors at its shows plus companies Amplemarket finds that aren't at any show you track. The best fits are then researched and written up for approval.</p>
+
+<details class="card add-show" {% if not rows %}open{% endif %}>
+  <summary><h2>Start an industry campaign</h2><span class="btn ghost small">+ Add</span></summary>
+  <form method="post" class="grid">
+    {{ csrf_field }}
+    <label>Industry name <span class="req">*</span><input name="name" required placeholder="e.g. Dental"></label>
+    <label>Where <input name="locations" value="United Kingdom" placeholder="United Kingdom"><div class="field-help">Company locations to search, one per line.</div></label>
+    <label class="full">Keywords <textarea name="keywords" rows="3" placeholder="dental&#10;orthodontic&#10;dental equipment"></textarea>
+      <div class="field-help">One per line. Used to find companies and shows.</div></label>
+    <label>Amplemarket industries <span class="hint">(optional)</span><textarea name="am_industries" rows="2" placeholder="Medical Devices"></textarea></label>
+    <label>Smallest company (employees) <input name="min_employees" type="number" placeholder="20"></label>
+    <div class="full"><button type="submit">Create campaign</button></div>
+  </form>
+</details>
+
+{% if rows %}
+<div class="card flush">
+  <table>
+    <thead><tr><th>Industry</th><th>Status</th><th class="num">Shows</th><th class="num">Companies found</th><th class="num">Contacted</th><th class="num">Replies</th><th>Owner</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr data-href="{{ url_for('industry_page', iid=r.id) }}">
+        <td class="name"><a href="{{ url_for('industry_page', iid=r.id) }}">{{ r.name }}</a><small>{{ (r.keywords or '').splitlines()|select|join(', ') }}</small></td>
+        <td>{% if r.prospecting %}<span class="pill ok">Active</span>{% else %}<span class="pill">Paused</span>{% endif %}</td>
+        <td class="num">{{ r.shows }}</td>
+        <td class="num">{{ r.found|thousands }}</td>
+        <td class="num">{{ r.contacted }}</td>
+        <td class="num">{{ r.replied }}</td>
+        <td class="nowrap">{{ r.owner_name or (r.owner_email or '').split('@')[0] or 'Up for grabs' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

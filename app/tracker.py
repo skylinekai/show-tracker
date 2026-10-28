@@ -34,7 +34,8 @@ def is_running(show_id: int) -> bool:
     return show_id in _running
 
 
-def add_show(url: str, name: str = "", start_date: str = "", location: str = "", parent_show_id=None) -> int:
+def add_show(url: str, name: str = "", start_date: str = "", location: str = "", parent_show_id=None,
+             owner_id: int | None = None) -> int:
     url = url.strip()
     if not re.match(r"^https?://", url):
         url = "https://" + url
@@ -46,10 +47,29 @@ def add_show(url: str, name: str = "", start_date: str = "", location: str = "",
         if existing:
             return existing["id"]
         return db.insert(
-            "INSERT INTO shows (name, url, platform, start_date, location, created_at, parent_show_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name.strip(), url, platform, start_date or None, location.strip() or None, now(), parent_show_id),
+            "INSERT INTO shows (name, url, platform, start_date, location, created_at, parent_show_id, owner_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (name.strip(), url, platform, start_date or None, location.strip() or None, now(), parent_show_id, owner_id),
         )
+
+
+def add_pdf_show(pdf: bytes, filename: str, name: str, start_date: str = "", location: str = "",
+                 owner_id: int | None = None) -> int:
+    """A show tracked from an uploaded floorplan PDF rather than a website."""
+    with connect() as db:
+        sid = db.insert(
+            "INSERT INTO shows (name, url, platform, start_date, location, created_at, owner_id) VALUES (?, ?, 'pdf', ?, ?, ?, ?)",
+            (name.strip() or filename.rsplit(".", 1)[0], f"pdf://pending/{now()}", start_date or None,
+             location.strip() or None, now(), owner_id))
+        db.execute("UPDATE shows SET url = ? WHERE id = ?", (f"pdf://show/{sid}", sid))
+    add_floorplan(sid, pdf, filename, owner_id)
+    return sid
+
+
+def add_floorplan(show_id: int, pdf: bytes, filename: str, user_id: int | None = None) -> None:
+    with connect() as db:
+        db.insert("INSERT INTO show_files (show_id, filename, data, uploaded_at, uploaded_by) VALUES (?, ?, ?, ?, ?)",
+                  (show_id, filename[:200], pdf, now(), user_id))
 
 
 def check_show(show_id: int, scraper=scrape) -> dict:
@@ -90,7 +110,7 @@ def _check_show(show_id: int, scraper) -> dict:
     with connect() as db:
         current = {
             r["name_key"]: r
-            for r in db.all("SELECT id, name_key, removed_at FROM exhibitors WHERE show_id = ?", (show_id,))
+            for r in db.all("SELECT id, name_key, removed_at, booth_sqft FROM exhibitors WHERE show_id = ?", (show_id,))
         }
         active_before = sum(1 for r in current.values() if r["removed_at"] is None)
         seen = set()
@@ -101,6 +121,10 @@ def _check_show(show_id: int, scraper) -> dict:
             seen.add(key)
             sqft, dims, hall = r.get("booth_sqft"), r.get("booth_dims") or "", r.get("hall") or ""
             if key in current:
+                old = current[key]["booth_sqft"]
+                if sqft and old and abs(sqft - old) >= 10:  # stand changed size since last check
+                    db.execute("INSERT INTO stand_history (exhibitor_id, old_sqft, new_sqft, changed_at) VALUES (?, ?, ?, ?)",
+                               (current[key]["id"], old, sqft, ts))
                 db.execute(
                     "UPDATE exhibitors SET name = ?, booth = ?, "
                     "description = CASE WHEN ? <> '' THEN ? ELSE description END, "
@@ -148,12 +172,18 @@ def _check_show(show_id: int, scraper) -> dict:
     if added:
         _push_new(show, added)
         log_activity("new_exhibitors", f"{len(added)} new exhibitor{'s' if len(added) != 1 else ''} at {show['name']}",
-                     f"show:{show_id}")
+                     f"show:{show_id}", show.get("owner_id"))
         _big_booth_alerts(show, added)
     if first_check:
-        log_activity("show_added", f"Started tracking {show['name']}: {len(seen)} exhibitors", f"show:{show_id}")
+        log_activity("show_added", f"Started tracking {show['name']}: {len(seen)} exhibitors", f"show:{show_id}",
+                     show.get("owner_id"))
     if show["platform"] == "mapyourshow" and not show["next_edition_url"]:
         _probe_next_edition(show, scraper)
+    try:
+        from . import opportunities
+        opportunities.scan_show(show_id)
+    except Exception:  # noqa: BLE001 - spotting opportunities must never break tracking
+        log.exception("opportunity scan failed for show %s", show_id)
 
     return {"found": len(seen), "added": len(added), "removed": removed, "first_check": first_check, "warning": warning}
 
@@ -161,7 +191,9 @@ def _check_show(show_id: int, scraper) -> dict:
 def _big_booth_alerts(show: dict, added: list[dict]) -> None:
     from . import settings as cfg
 
-    threshold = cfg.get("big_booth_alert_sqft")
+    from .value import SQFT_PER_SQM
+
+    threshold = cfg.get("big_stand_alert_sqm") * SQFT_PER_SQM
     big = [a for a in added if a.get("booth_sqft") and a["booth_sqft"] >= threshold]
     if big:
         notify.big_booths(show, big)
@@ -199,6 +231,17 @@ def _probe_next_edition(show: dict, scraper) -> None:
     url = mys_next_edition_url(show["url"])
     if not url:
         return
+    from .opportunities import series_key
+
+    with connect() as db:  # already tracking next year's edition under another link? link it, don't duplicate
+        later = [o for o in db.all("SELECT id, name, start_date FROM shows WHERE id <> ?", (show["id"],))
+                 if series_key(o["name"]) == series_key(show["name"])
+                 and (o["start_date"] or "9999") > (show.get("start_date") or "")]
+        if later:
+            db.execute("UPDATE shows SET next_edition_url = ? WHERE id = ?", (url, show["id"]))
+            if not db.one("SELECT parent_show_id FROM shows WHERE id = ?", (later[0]["id"],))["parent_show_id"]:
+                db.execute("UPDATE shows SET parent_show_id = ? WHERE id = ?", (show["id"], later[0]["id"]))
+            return
     try:
         rows = scraper(url, "mapyourshow")
     except Exception:  # noqa: BLE001 - not live yet is the normal case
@@ -206,7 +249,7 @@ def _probe_next_edition(show: dict, scraper) -> None:
     if not rows:
         return
     new_id = add_show(url, name=_bump_year(show["name"]), location=show.get("location") or "",
-                      parent_show_id=show["id"])
+                      parent_show_id=show["id"], owner_id=show.get("owner_id"))
     with connect() as db:
         db.execute("UPDATE shows SET next_edition_url = ? WHERE id = ?", (url, show["id"]))
     notify.next_edition_found(show, url, len(rows))
@@ -218,7 +261,8 @@ def due_shows() -> list[dict]:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=CHECK_INTERVAL_HOURS)).replace(microsecond=0).isoformat()
     with connect() as db:
         return db.all(
-            "SELECT * FROM shows WHERE active = 1 AND (last_checked_at IS NULL OR last_checked_at < ?) "
+            "SELECT * FROM shows WHERE active = 1 AND platform <> 'pdf' "
+            "AND (last_checked_at IS NULL OR last_checked_at < ?) "
             "ORDER BY last_checked_at IS NOT NULL, last_checked_at",
             (cutoff,),
         )

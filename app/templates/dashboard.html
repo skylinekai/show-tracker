@@ -2,7 +2,7 @@
 {% block title %}Shows{% endblock %}
 {% block head %}{% if shows|selectattr('status', 'equalto', 'Checking')|list %}<meta http-equiv="refresh" content="6">{% endif %}{% endblock %}
 {% block content %}
-<h1>Shows</h1>
+<div class="titlerow"><h1>Shows</h1><div class="actions"><a class="btn ghost" href="{{ url_for('new_feed') }}">New exhibitors</a><a class="btn ghost" href="{{ url_for('discover') }}">Find shows</a></div></div>
 <p class="lede">Every show is re-checked daily. New exhibitors are flagged, and on shows with prospecting switched on the best fits are researched and written up for you to approve.</p>
 
 {% if setup %}
@@ -13,33 +13,59 @@
   <div class="stat"><b>{{ stats.shows }}</b><span>shows tracked</span></div>
   <div class="stat"><b>{{ stats.exhibitors|thousands }}</b><span>exhibitors listed</span></div>
   <div class="stat hl"><b>{{ stats.new }}</b><span>new in the last {{ window }} days</span></div>
-  <div class="stat"><b>{{ review_count }}</b><span><a href="{{ url_for('outreach') }}">waiting for approval</a></span></div>
+  <div class="stat"><b>{{ stats.review }}</b><span><a href="{{ url_for('outreach') }}">waiting for {{ 'your ' if who == 'me' else '' }}approval</a></span></div>
   <div class="stat"><b>{{ stats.sent }}</b><span>contacted (30 days)</span></div>
   <div class="stat hl"><b>{{ stats.replied }}</b><span>replies (30 days)</span></div>
 </section>
 
 <details class="card add-show" {% if not shows %}open{% endif %}>
   <summary><h2>Track a show</h2><span class="btn ghost small">+ Add</span></summary>
-  <form method="post" action="{{ url_for('create_show') }}" class="grid">
+  <form method="post" action="{{ url_for('create_show') }}" class="grid" enctype="multipart/form-data">
     {{ csrf_field }}
-    <label class="full">Exhibitor list link <span class="hint">Map Your Show, A2Z (…/Public/Exhibitors.aspx), eShow, or any page with an exhibitor table</span>
-      <input name="url" required placeholder="https://nab27.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm"></label>
-    <label>Show name <input name="name" placeholder="e.g. NAB Show 2027"></label>
-    <label>Venue / location <input name="location" placeholder="e.g. Las Vegas"></label>
+    <div class="full source-pick">
+      <label class="check inline"><input type="radio" name="source" value="link" checked onchange="pickSource(this.value)"><span>Exhibitor list link</span></label>
+      <label class="check inline"><input type="radio" name="source" value="pdf" onchange="pickSource(this.value)"><span>PDF floorplan</span></label>
+    </div>
+    <label class="full" id="src-link">Exhibitor list link <span class="hint">Map Your Show, A2Z (…/Public/Exhibitors.aspx), eShow, or any page with an exhibitor table</span>
+      <input name="url" placeholder="https://nab27.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm"></label>
+    <label class="full" id="src-pdf" hidden>Floorplan or exhibitor list (PDF) <span class="hint">read by AI; upload a newer version any time to catch new exhibitors</span>
+      <input name="floorplan" type="file" accept="application/pdf,.pdf"></label>
+    <label>Show name <input name="name" placeholder="e.g. Dentistry Show London 2027"></label>
+    <label>Venue / location <input name="location" placeholder="e.g. NEC Birmingham"></label>
     <label>Show date <input name="start_date" type="date"></label>
-    <div class="full"><button type="submit">Start tracking</button></div>
+    <div class="full"><button type="submit">Start tracking</button>
+      <span class="small" style="margin-left:10px">Gets every exhibitor, then finds 2–3 marketing, brand and events contacts at the best fits.</span></div>
   </form>
+  <script>
+    function pickSource(v) {
+      document.getElementById('src-link').hidden = v !== 'link';
+      document.getElementById('src-pdf').hidden = v !== 'pdf';
+    }
+  </script>
 </details>
 
 {% if suggestions %}
 <div class="note ok"><p><b>{{ suggestions }} new show{{ 's' if suggestions != 1 }} found</b> matching your industries. <a href="{{ url_for('discover') }}">Review them</a></p></div>
 {% endif %}
 
+<div class="chips">
+  <a class="chip {{ 'on' if who == 'me' }}" href="{{ url_for('dashboard', who='me') }}">My shows <span>{{ counts.me }}</span></a>
+  {% if user.is_admin %}<a class="chip {{ 'on' if who == 'all' }}" href="{{ url_for('dashboard', who='all') }}">All shows <span>{{ counts.all }}</span></a>{% endif %}
+  {% if counts.unassigned %}<a class="chip {{ 'on' if who == 'unassigned' }}" href="{{ url_for('dashboard', who='unassigned') }}">Up for grabs <span>{{ counts.unassigned }}</span></a>{% endif %}
+  {% if user.is_admin and team|length > 1 %}
+  <span class="grow"></span>
+  <form method="get" style="min-width:200px"><select name="who" onchange="this.form.submit()" style="margin:0;border-radius:999px;padding:7px 14px">
+    <option value="">Someone's shows…</option>
+    {% for t in team %}<option value="{{ t.id }}" {% if who == t.id|string %}selected{% endif %}>{{ display_name(t) }}</option>{% endfor %}
+  </select></form>
+  {% endif %}
+</div>
+
 {% if shows %}
 <div class="card flush">
   <div class="tablewrap">
   <table>
-    <thead><tr><th>Show</th><th>Status</th><th>Date</th><th class="num">Days</th><th class="num">Exhibitors</th><th class="num">New ({{ window }}d)</th><th class="num">Contacted</th><th>Last checked</th></tr></thead>
+    <thead><tr><th>Show</th><th>Status</th><th>Date</th><th class="num">Days</th><th class="num">Exhibitors</th><th class="num">New ({{ window }}d)</th><th class="num">Contacted</th><th>Owner</th></tr></thead>
     <tbody>
     {% for s in shows %}
       <tr class="{{ 'dim' if (s.days_until is not none and s.days_until < 0) or not s.active }}" data-href="{{ url_for('show_page', show_id=s.id) }}">
@@ -51,7 +77,7 @@
         <td class="num">{{ s.active_count|thousands }}</td>
         <td class="num">{% if s.new_count %}<b style="color:var(--green);font-weight:500">+{{ s.new_count }}</b>{% else %}<span class="faint">–</span>{% endif %}</td>
         <td class="num">{{ s.sent_count or '–' }}</td>
-        <td class="muted nowrap">{{ s.last_checked_at|ago }}</td>
+        <td class="nowrap">{% if s.owner_id %}{{ s.owner_name or s.owner_email.split('@')[0] }}{% else %}<span class="faint">Up for grabs</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -59,7 +85,7 @@
   </div>
 </div>
 {% else %}
-<p class="empty">No shows yet. Paste a show's exhibitor list link above to start.</p>
+<p class="empty">{% if who == 'me' %}You don't have any shows yet. Add one above, or take one from <a href="{{ url_for('dashboard', who='unassigned') }}">Up for grabs</a>.{% elif who == 'unassigned' %}Every show has an owner.{% else %}No shows yet. Paste a show's exhibitor list link above to start.{% endif %}</p>
 {% endif %}
 
 <section class="card" style="margin-top:18px">

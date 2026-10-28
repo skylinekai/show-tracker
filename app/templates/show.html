@@ -7,9 +7,9 @@
   <div>
     <h1>{{ show.name }}</h1>
     <p class="lede" style="margin-bottom:16px">
-      <span class="pill {{ show.status_class }}">{{ show.status }}</span>&nbsp;
+      <span class="pill {{ show.status_class }}">{{ show.status }}</span>&nbsp;{% if priority %}<span class="tag navy" style="margin:0 6px 0 0">In-house</span>{% endif %}
       {% if show.start_date %}{{ show.start_date|nicedate }}{% if show.days_until is not none and show.days_until >= 0 %} · {{ show.days_until }} days away{% endif %}{% endif %}
-      {% if show.location %} · {{ show.location }}{% endif %} · checked {{ show.last_checked_at|ago }} · <a href="{{ show.url }}" target="_blank" rel="noopener">exhibitor list ↗</a>
+      {% if show.location %} · {{ show.location }}{% endif %} · checked {{ show.last_checked_at|ago }}{% if show.platform != 'pdf' %} · <a href="{{ show.url }}" target="_blank" rel="noopener">exhibitor list ↗</a>{% endif %}
     </p>
   </div>
   <div class="actions">
@@ -22,6 +22,26 @@
 {% if show.last_error %}<div class="note {{ 'bad' if show.status_class == 'bad' else 'warn' }}"><p>{{ show.last_error }}</p></div>{% endif %}
 {% if child %}<div class="note ok"><p>Next year's edition is live and being tracked: <a href="{{ url_for('show_page', show_id=child.id) }}">{{ child.name }}</a></p></div>{% endif %}
 {% if parent %}<div class="note"><p>Found automatically when it went live, as the next edition of <a href="{{ url_for('show_page', show_id=parent.id) }}">{{ parent.name }}</a>.</p></div>{% endif %}
+
+<div class="card" style="padding:14px 24px">
+  <div class="formrow" style="margin:0;justify-content:space-between">
+    <div><span class="muted">Owner:</span> <b style="font-weight:500">{{ show.owner_name or (show.owner_email or '').split('@')[0] or 'Up for grabs' }}</b>
+      {% if not show.owner_id %}<form method="post" action="{{ url_for('show_owner', show_id=show.id) }}" style="display:inline;margin-left:10px">{{ csrf_field }}<input type="hidden" name="owner_id" value="me"><button class="small">Take this show</button></form>{% endif %}
+    </div>
+    <div class="formrow" style="margin:0">
+      {% if user.is_admin %}
+      <form method="post" action="{{ url_for('show_owner', show_id=show.id) }}" class="formrow" style="margin:0">{{ csrf_field }}
+        <select name="owner_id" style="margin:0;width:auto" onchange="this.form.submit()"><option value="">Up for grabs</option>
+          {% for t in team %}<option value="{{ t.id }}" {% if show.owner_id == t.id %}selected{% endif %}>{{ display_name(t) }}</option>{% endfor %}</select></form>
+      {% elif show.owner_id == user.id %}
+      <form method="post" action="{{ url_for('show_owner', show_id=show.id) }}" style="margin:0">{{ csrf_field }}<input type="hidden" name="owner_id" value=""><button class="ghost small" onclick="return confirm('Release this show so a teammate can take it?')">Release</button></form>
+      {% endif %}
+      <form method="post" action="{{ url_for('show_industry', show_id=show.id) }}" style="margin:0">{{ csrf_field }}
+        <select name="industry_id" style="margin:0;width:auto" onchange="this.form.submit()"><option value="">No industry</option>
+          {% for i in industries %}<option value="{{ i.id }}" {% if show.industry_id == i.id %}selected{% endif %}>{{ i.name }}</option>{% endfor %}</select></form>
+    </div>
+  </div>
+</div>
 
 <form class="card" method="post" action="{{ url_for('show_prospecting', show_id=show.id) }}">
   {{ csrf_field }}<input type="hidden" name="was_on" value="{{ show.prospecting }}">
@@ -51,8 +71,12 @@
         <option value="">Use the default{% if conf.default_sequence_id %} from Settings{% endif %}</option>
         {% for s in sequences %}<option value="{{ s.id }}" {% if show.sequence_id == s.id %}selected{% endif %}>{{ s.name }}{% if s.status == 'paused' %} (paused){% endif %}</option>{% endfor %}
       </select></label>
-    <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" name="auto_send" value="1" {% if show.auto_send %}checked{% endif %}>
-      <span>Send without my approval <span class="hint">· good fits go straight into the sequence</span></span></label>
+    <div style="align-self:end;display:grid;gap:8px;padding-bottom:6px">
+      <label class="check"><input type="checkbox" name="auto_send_new" value="1" {% if show.auto_send_new %}checked{% endif %}>
+        <span>New exhibitors go straight into the sequence <span class="hint">· once you've approved this show's first batch</span></span></label>
+      <label class="check"><input type="checkbox" name="auto_send" value="1" {% if show.auto_send %}checked{% endif %}>
+        <span>Send everything without approval, including the first batch</span></label>
+    </div>
     <div class="full actions">
       <button type="submit">Save</button>
       {% if lead_counts.review %}<a class="btn ghost" href="{{ url_for('outreach', show=show.id) }}">{{ lead_counts.review }} waiting for approval →</a>{% endif %}
@@ -62,6 +86,24 @@
   <input type="hidden" name="sequence_id" value="{{ show.sequence_id or '' }}">
   {% endif %}
 </form>
+
+{% if show.platform == 'pdf' %}
+<section class="card">
+  <div class="titlerow">
+    <div>
+      <h2>Floorplan</h2>
+      <p class="sub" style="margin:0">{% if files %}Latest: {{ files[0].filename }}, uploaded {{ files[0].uploaded_at|ago }}{% if files[0].error %} · <span style="color:var(--red)">{{ files[0].error }}</span>{% elif not files[0].extracted_at %} · being read…{% endif %}.
+        {% if files|length > 1 %}{{ files|length }} versions so far.{% endif %}{% endif %}
+        Organisers update floorplans as stands sell; upload the latest and new exhibitors are flagged and prospected.</p>
+    </div>
+    {% if can_manage %}
+    <form method="post" action="{{ url_for('upload_floorplan', show_id=show.id) }}" enctype="multipart/form-data" class="formrow" style="margin:0">
+      {{ csrf_field }}<input type="file" name="floorplan" accept="application/pdf,.pdf" required style="margin:0;width:auto"><button class="ghost">Upload newer floorplan</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
 
 <div class="chips">
   {% for key, (label, _) in views.items() %}
@@ -79,23 +121,26 @@
   <thead><tr>
     <th><a href="{{ url_for('show_page', show_id=show.id, view=view, q=q or None, sort='name') }}" class="{{ 'on' if sort == 'name' }}">Company</a></th>
     <th>Booth</th>
-    <th class="num"><a href="{{ url_for('show_page', show_id=show.id, view=view, q=q or None, sort='booth') }}" class="{{ 'on' if sort == 'booth' }}">Size ↓</a></th>
+    <th class="num"><a href="{{ url_for('show_page', show_id=show.id, view=view, q=q or None, sort='booth') }}" class="{{ 'on' if sort == 'booth' }}">Stand ↓</a></th>
     {% if show.prospecting %}<th class="num"><a href="{{ url_for('show_page', show_id=show.id, view=view, q=q or None, sort='score') }}" class="{{ 'on' if sort == 'score' }}">Score ↓</a></th><th>Outreach</th>{% endif %}
     <th><a href="{{ url_for('show_page', show_id=show.id, view=view, q=q or None, sort='new') }}" class="{{ 'on' if sort == 'new' }}">First seen</a></th>
   </tr></thead>
   <tbody>
   {% for e in rows %}
     <tr>
-      <td class="name">{% if e.profile_url %}<a href="{{ e.profile_url }}" target="_blank" rel="noopener">{{ e.name }}</a>{% else %}{{ e.name }}{% endif %}
+      <td class="name"><a href="{{ url_for('company_page', key=e.name_key) }}">{{ e.name }}</a>{% if e.profile_url %} <a href="{{ e.profile_url }}" target="_blank" rel="noopener" class="small" title="Exhibitor listing">↗</a>{% endif %}
+        {% if e.other_shows %}<span class="tag" title="Also exhibiting at other tracked shows">+{{ e.other_shows }} show{{ 's' if e.other_shows != 1 }}</span>{% endif %}
         {% if not e.in_first_snapshot and not e.likely_junk %}<span class="tag">New</span>{% endif %}
         {% if e.description %}<small class="desc">{{ e.description[:150] }}{% if e.description|length > 150 %}…{% endif %}</small>{% endif %}</td>
       <td class="nowrap">{{ e.booth or '–' }}{% if e.hall %}<small>{{ e.hall }}</small>{% endif %}</td>
-      <td class="num nowrap">{% if e.booth_sqft %}{{ e.booth_sqft|thousands }} sq ft{% if e.booth_dims %}<small>{{ e.booth_dims }}</small>{% endif %}{% else %}<span class="faint">–</span>{% endif %}</td>
+      <td class="num nowrap">{% if e.booth_sqft %}{{ e.booth_sqft|m2 }}<small>{{ e.booth_sqft|thousands }} sq ft · est. {{ e.value|moneyrange }}</small>{% else %}<span class="faint">–</span>{% endif %}</td>
       {% if show.prospecting %}
       <td class="num">{{ e.score if e.score is not none else '' }}</td>
       <td>
         {% if e.lead_sent %}<span class="pill ok">{{ 'Replied' if e.lead_sent == 'replied' else 'In sequence' }}</span>
         {% elif e.stage == 'queued' %}<a class="pill run" href="{{ url_for('outreach', show=show.id) }}" style="text-decoration:none">Ready ({{ e.lead_count }})</a>
+        {% elif e.stage == 'teammate' %}<span class="pill warn plain">{{ e.score_notes }}</span>
+        {% elif e.stage == 'in_outreach' %}<a class="pill run plain" href="{{ url_for('company_page', key=e.name_key) }}" style="text-decoration:none">Already in outreach</a>
         {% elif e.stage in ('skipped', 'low_score', 'not_found', 'no_contacts') %}<span class="pill plain" title="{{ e.score_notes or '' }}">{{ {'skipped': 'Skipped', 'low_score': 'Low score', 'not_found': 'Not found', 'no_contacts': 'No contacts'}[e.stage] }}</span><small>{{ (e.score_notes or '')[:70] }}</small>
         {% elif e.stage == 'error' %}<span class="pill bad" title="{{ e.score_notes or '' }}">Error</span>
         {% elif not e.likely_junk and not e.removed_at %}
@@ -134,7 +179,7 @@
       <label class="full">Show name <input name="name" value="{{ show.name }}"></label>
       <label>Date <input name="start_date" type="date" value="{{ (show.start_date or '')[:10] }}"></label>
       <label>Venue / location <input name="location" value="{{ show.location or '' }}"></label>
-      <label class="full">Exhibitor list link <input name="url" value="{{ show.url }}"></label>
+      {% if show.platform == 'pdf' %}<input type="hidden" name="url" value="{{ show.url }}">{% else %}<label class="full">Exhibitor list link <input name="url" value="{{ show.url }}"></label>{% endif %}
       <div class="full"><button type="submit">Save</button></div>
     </form>
     <div class="actions" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--line-soft)">

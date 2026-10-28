@@ -79,28 +79,42 @@ def next_edition_found(show: dict, url: str, count: int) -> None:
 
 
 def big_booths(show: dict, exhibitors: list[dict]) -> None:
+    from . import settings as cfg
+    from .value import is_outsourced, money_range, sqm, stand_value
+
+    conf = cfg.all_settings()
     rows = "".join(
-        f"<li><b>{_esc(e['name'])}</b>: {e['booth_sqft']:,} sq ft{(' (' + _esc(e['booth_dims']) + ')') if e.get('booth_dims') else ''}"
-        f"{', booth ' + _esc(e['booth']) if e.get('booth') else ''}</li>" for e in exhibitors)
-    names = ", ".join(f"{e['name']} ({e['booth_sqft']:,} sq ft)" for e in exhibitors[:8])
+        f"<li><b>{_esc(e['name'])}</b>: {sqm(e['booth_sqft']):,.0f} m²"
+        f"{(' (' + _esc(e['booth_dims']) + ')') if e.get('booth_dims') else ''}"
+        f"{', booth ' + _esc(e['booth']) if e.get('booth') else ''}"
+        f" · est. {money_range(stand_value(sqm(e['booth_sqft']), conf, is_outsourced(show, conf)))}</li>" for e in exhibitors)
+    names = ", ".join(f"{e['name']} ({sqm(e['booth_sqft']):,.0f} m²)" for e in exhibitors[:8])
     _slack(f":large_green_circle: *Big booth{'s' if len(exhibitors) > 1 else ''} just added at {show['name']}*: {names}")
     path = "/shows/%s?view=new" % show["id"]
+    owner_email = None
+    if show.get("owner_id"):
+        from .db import connect
+        with connect() as db:
+            row = db.one("SELECT email FROM users WHERE id = ?", (show["owner_id"],))
+        owner_email = row["email"] if row else None
     alert_email(f"Big booth at {show['name']}: {exhibitors[0]['name']}"
                 + (f" and {len(exhibitors) - 1} more" if len(exhibitors) > 1 else ""),
                 f"<p>New exhibitor{'s' if len(exhibitors) > 1 else ''} with a large booth at <b>{_esc(show['name'])}</b>:</p>"
-                f"<ul>{rows}</ul>" + _link(path, "Open the show"))
+                f"<ul>{rows}</ul>" + _link(path, "Open the show"), [owner_email] if owner_email else None)
 
 
 def hot_reply(lead: dict, label: str, snippet: str) -> None:
     who = f"{lead.get('contact_name') or lead.get('email')} ({lead.get('company_name')})"
-    _slack(f":fire: *{label.replace('_', ' ').title() if label else 'New reply'}* from {who} "
+    owner = f" (for {lead['owner_name']})" if lead.get("owner_name") else ""
+    _slack(f":fire: *{label.replace('_', ' ').title() if label else 'New reply'}* from {who}{owner} "
            f"re {lead.get('show_name')}: _{snippet[:200]}_")
     alert_email(f"Reply from {who}",
                 f"<p><b>{_esc(who)}</b> replied about <b>{_esc(lead.get('show_name') or '')}</b>"
                 f"{' and was marked <b>' + _esc(label.replace('_', ' ')) + '</b>' if label else ''}.</p>"
                 f"<blockquote style='border-left:3px solid #24215C;margin:0;padding:4px 12px;color:#444'>"
                 f"{_esc(snippet[:600])}</blockquote><p>Reply from Amplemarket to keep the thread together.</p>"
-                + _link("/outreach?view=replied", "See all replies"))
+                + _link("/outreach?view=replied", "See all replies"),
+                [lead["owner_email"]] if lead.get("owner_email") else None)
 
 
 # ---------------------------------------------------------------- email
@@ -142,10 +156,13 @@ def send_email(to: list[str], subject: str, html: str) -> bool:
         return False
 
 
-def alert_email(subject: str, body_html: str) -> None:
+def alert_email(subject: str, body_html: str, to: list[str] | None = None) -> None:
+    """Alerts go to the salesperson concerned; without one, to the team address in Settings."""
     from . import settings as cfg
 
-    to = [t for t in str(cfg.get("briefing_to") or "").split(",") if t.strip()]
+    if not cfg.get("email_alerts"):
+        return
+    to = [t for t in (to or []) if t] or [t for t in str(cfg.get("briefing_to") or "").split(",") if t.strip()]
     if to:
         send_email(to, subject, wrap_email(subject, body_html))
 

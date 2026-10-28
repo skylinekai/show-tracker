@@ -245,3 +245,7 @@ table.users .rowactions form { margin: 0; }
 table.users tr.editrow td { background: #fbfbfd; padding: 18px 16px 20px; }
 table.users tbody tr:hover td { background: transparent; }
 table.users tr.editrow:hover td { background: #fbfbfd; }
+
+.source-pick { display: flex; gap: 22px; }
+input[type=file] { width: 100%; margin-top: 6px; font: 400 14.5px var(--font); padding: 9px; border: 1px dashed var(--line); background: #fff; }
+[hidden] { display: none !important; }

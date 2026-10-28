@@ -1,87 +1,107 @@
 # Show Tracker · Skyline Whitespace
 
-Your business development robot for trade shows. It:
+The sales team's business development robot. Each salesperson signs in and works their own shows, industries and
+opportunities. The app finds the companies, works out what they're worth, finds the right people, writes the
+opening lines, and feeds approved contacts into Amplemarket sequences sent from that salesperson's own mailbox.
 
-1. **Tracks shows.** Watches each show's exhibitor list daily (Map Your Show, A2Z, eShow or any exhibitor table), flags new exhibitors and drop-outs, and pulls exact booth sizes from Map Your Show floorplans.
-2. **Finds the right companies.** On shows with **Prospecting** switched on, it scores every exhibitor on booth size, company size, industry and timing, and skips poor fits and competitors before spending any credits.
-3. **Finds the right people.** For the best fits, it uses Amplemarket to find decision-makers (events, marketing, trade show managers), reveal their emails and check they're deliverable.
-4. **Writes the emails.** Claude writes a personalised subject and opening line for each person, mentioning the show, their booth and their company, using only the facts you give it.
-5. **Waits for you.** Everything lands in **Outreach** for you to edit and approve in a click. You can set a show to send without approval.
-6. **Sends at the right time.** Approved contacts go into your Amplemarket sequence when the show enters your outreach window (by default 270 to 45 days before the show). Amplemarket handles the sending, follow-ups and opt-outs.
-7. **Stays on top of things.** A daily briefing email, instant alerts for replies and big booths, automatic tracking of next year's edition, and a weekly web search for new shows in your industries.
+## The three dashboards
+
+**Shows**: target a specific show.
+- Add a show by pasting its exhibitor list link (Map Your Show, A2Z, eShow, any exhibitor table) **or by
+  uploading a PDF floorplan**. A PDF is read by AI; upload a newer version as the organiser updates it.
+- **Start tracking** gets every exhibitor and starts prospecting straight away: the best fits are researched
+  (2–3 marketing, brand and events contacts each, with checked emails) and an opening line is written for each person.
+- The show is re-checked every 24 hours. You approve the first batch; after that, new exhibitors go straight
+  into the sequence (switchable per show).
+- Next year's edition is picked up automatically when its directory goes live (Map Your Show).
+
+**Industries**: target a whole industry, e.g. Dental.
+- Tag your dental shows to it, and Amplemarket finds dental companies that aren't at any show you track.
+- **Start campaign** researches the best fits weekly within your daily limit. Pick out companies yourself with
+  **Target now**, or add one by name or website.
+- **Find shows** searches the web for the industry's shows: London and Birmingham first, then the rest.
+
+**Opportunities**: a continuous list of companies to call before anyone else does. It runs in the background all
+the time; nothing is emailed out.
+- **First-time exhibitors**: no record at any other show you track, including the show's previous edition.
+- **Bigger stands**: more space than at their last show or last year's edition, or grown since tracking began.
+- **Recently funded / hiring event staff / growing fast**: likely to start or step up exhibiting.
+- New opportunities are added as shows are checked and from a daily search for funding, hiring and growth signals.
+- Each one is **researched in the background**, best first (score, plus 2–3 contacts with checked emails), within
+  **Opportunities researched per day** (default 30). Filter by **Ready to start** to see the ones with contacts.
+- **Start outreach** writes the openers and puts the contacts in your Outreach queue to approve.
+
+Also: **Companies** (every account ranked by estimated stand spend) and **Outreach** (your approval queue,
+scheduled, in sequence, replies).
+
+## How value is worked out
+
+- Stand size (m²) × your build rate: **£800–£1,000/m² in-house (60% GP)**, **£1,500/m² outsourced (e.g. North
+  America, 40% GP)**. All of this is editable in Settings.
+- Judged across the whole account: a 9 m² booth at one show still qualifies if they take 100 m² at another.
+- The cut-off is **£30k** (their biggest stand anywhere). **London and Birmingham** shows are researched first and score higher.
+- Company strength adds to the score: size, revenue, headcount growth, recent funding, and open marketing/events roles.
+- Deep research (Claude with web search) on the best accounts finds the other shows they do, revenue trend and
+  recent news, with sources.
+
+## Working as a team
+
+- Each person sees only their own shows, campaigns, companies, opportunities and outreach, plus anything
+  "up for grabs". Managers ("Can manage users and settings") see everyone's.
+- **No stepping on toes:** adding a show or industry a teammate already has is blocked with their name, and a
+  company already in someone's outreach is skipped for everyone else.
+- Emails go from each person's own Amplemarket mailbox, signed off with their name, title and number.
+- Replies alert the person who sent the email.
 
 ## Environment variables (Render → your service → Environment)
 
-| Variable | What it's for | Needed? |
-|---|---|---|
-| `DATABASE_URL` | Where data is stored, e.g. `sqlite:////var/data/showtracker.db` with a disk mounted at `/var/data` | Yes |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | The first sign-in account (you). Add teammates later under **Users**. | Yes, for first sign-in |
-| `SECRET_KEY` | Keeps people signed in across restarts. Any long random string. | Recommended |
-| `AMPLEMARKET_API_KEY` | Finding people, checking emails, adding contacts to sequences | For outreach |
-| `ANTHROPIC_API_KEY` | Writing opening lines and searching for new shows | For outreach |
-| `APP_BASE_URL` | Your app's address, e.g. `https://show-tracker.onrender.com`, used for links in emails and Slack | Recommended |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Sending the daily briefing and alerts | For the briefing |
-| `SLACK_WEBHOOK_URL` | Alerts in Slack | Optional |
-| `CLAY_WEBHOOK_URL` | Also send new exhibitors to Clay, as before | Optional |
-| `ADOBE_FONTS_KIT` | Your Adobe Fonts kit ID (e.g. `abc1234`) for Europa. Add your app's domain to the kit in Adobe Fonts. Without it the app uses Jost, a close free match. | For the brand font |
-| `CHECK_INTERVAL_HOURS` | How often shows are re-checked (default 24) | Optional |
+| Variable | What it's for |
+|---|---|
+| `DATABASE_URL` | e.g. `sqlite:////var/data/showtracker.db` with a disk at `/var/data` |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Your sign-in. Add teammates under **Users**. (An existing `APP_PASSWORD` still works for the first sign-in.) |
+| `SECRET_KEY` | Any long random string; keeps people signed in across restarts |
+| `AMPLEMARKET_API_KEY` | People and company search, email checks, sending sequences |
+| `ANTHROPIC_API_KEY` | Opening lines, reading PDF floorplans, deep research, finding shows |
+| `APP_BASE_URL` | e.g. `https://show-tracker.onrender.com`, used for links in emails |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Only if you switch on alert emails in Settings (off by default) |
+| `ADOBE_FONTS_KIT` | Your Adobe Fonts kit ID for Europa (otherwise the free lookalike Jost is used) |
+| `SLACK_WEBHOOK_URL`, `CLAY_WEBHOOK_URL` | Optional |
 
-If you deployed the first version with `APP_PASSWORD`, it still works: the first person to sign in with any email and that password becomes the admin. After that, sign in with your email and that password.
+## Setting up Amplemarket
 
-## Setting up outreach
-
-1. **Amplemarket API key:** in Amplemarket, open Settings and find the API section. Create a key, then add it as `AMPLEMARKET_API_KEY`.
-2. **Anthropic API key:** sign up at console.anthropic.com, add billing, create a key and add it as `ANTHROPIC_API_KEY`.
-3. **Create the sequence in Amplemarket.** Use these fields in the first email:
-   - `{{opening_line}}`: the personalised 1–2 sentences. Start the email with this.
-   - `{{subject_line}}`: the personalised subject.
-   - `{{first_name}}`, `{{company_name}}`, `{{show_name}}`, `{{show_date}}`, `{{show_location}}`, `{{booth_number}}`, `{{booth_size}}`, `{{title}}`
-
-   Activate or pause the sequence. Amplemarket won't accept contacts into a draft sequence.
-4. **In the app's Settings:**
-   - Fill in **What you offer** and **Proof points**. The AI never claims anything beyond these.
-   - Pick the default sequence and check the targeting and timing.
-   - Add your email to **Send the daily briefing to**.
-5. **Replies:** copy the webhook link from **Settings → Replies from Amplemarket** into Amplemarket's reply webhook (JSON data integration). Replies then show up in **Outreach → Replied** and trigger alerts.
-6. **Switch on prospecting** on a show (the switch at the top of its page). Researched contacts appear in **Outreach** over the following hours, up to your daily limit.
-
-## Email for the briefing (SMTP)
-
-The app can send email through most mail providers:
-
-| Provider | `SMTP_HOST` | `SMTP_PORT` | Notes |
-|---|---|---|---|
-| Microsoft 365 | `smtp.office365.com` | 587 | Your IT admin may need to enable "Authenticated SMTP" for the mailbox |
-| Google Workspace | `smtp.gmail.com` | 587 | Use an app password |
-| Postmark, Resend, SendGrid | the provider's SMTP host | | Usually the simplest option |
-
-Set `SMTP_USER` and `SMTP_PASSWORD` to the mailbox login, and `SMTP_FROM` to the address the emails should come from.
+1. Create a sequence. Start the first email with `{{opening_line}}` and use `{{subject_line}}` as the subject. Other
+   fields available: `{{first_name}}`, `{{company_name}}`, `{{show_name}}`, `{{show_date}}`, `{{show_location}}`,
+   `{{booth_number}}`, `{{stand_size}}`, `{{industry}}`, `{{sender_first_name}}`, `{{sender_name}}`, `{{sender_title}}`,
+   `{{sender_phone}}`.
+2. Set it to active (or paused). Pick it in **Settings → Amplemarket**.
+3. Each person picks their own mailbox under **My details → Your outreach**.
+4. Paste the webhook link from **Settings → Replies from Amplemarket** into Amplemarket's reply webhook.
 
 ## Costs to keep an eye on
 
-- **Amplemarket credits:** each researched company uses credits for email reveals and validation. **Companies researched per day** in Settings caps this (default 60). A company researched for one show is reused for the next for 120 days, at no extra cost.
-- **Claude:** writing openers costs a fraction of a penny per contact. The weekly show search runs up to 10 web searches.
+- **Amplemarket credits:** used for email reveals, validation and company look-ups. **Companies researched per day**
+  (default 60) caps it, and research on a company is reused for 120 days.
+- **Claude:** openers cost a fraction of a penny each. Reading a PDF floorplan costs pennies. Deep research
+  (default 15 a day) and show searches use web search, about 1p per search.
 
 ## Run it on your computer
 
 ```bash
 pip install -r requirements.txt
 ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=choose-one python wsgi.py   # http://localhost:8000
+python -m pytest -q                                                    # tests
 ```
-
-Tests: `pip install pytest && python -m pytest -q`
 
 ## Project layout
 
 ```
-app/scrapers.py     reading exhibitor lists (+ Map Your Show booth sizes)
-app/tracker.py      checking shows, new / dropped exhibitors, next-edition discovery
-app/prospecting.py  scoring, Amplemarket research, openers, approval, sending, replies
-app/amplemarket.py  Amplemarket API
-app/ai.py           Claude: opening lines and show search
-app/jobs.py         the 15-minute background loop, daily briefing, weekly show search
-app/notify.py       email, Slack, Clay
-app/settings.py     everything on the Settings page, with defaults
-app/auth.py         user accounts
-app/web.py          pages
+app/scrapers.py       exhibitor lists from show platforms and PDF floorplans
+app/tracker.py        daily checks, new / dropped exhibitors, stand-size history, next editions
+app/prospecting.py    scoring, research, openers, approvals, sending, replies (shows, industries, opportunities)
+app/opportunities.py  first-timers, bigger stands, funding / hiring / growth signals
+app/value.py          stand value, gross profit, priority and outsourced locations
+app/amplemarket.py    Amplemarket API
+app/ai.py             Claude: openers, PDF floorplans, deep research, finding shows
+app/jobs.py           background loop, opportunity research, morning briefing, weekly/daily refreshes
+app/web.py, app/web_accounts.py   pages
 ```

@@ -23,9 +23,17 @@
 
 <div class="chips">
   {% for key, (label, _) in views.items() %}
-    <a class="chip {{ 'on' if view == key }}" href="{{ url_for('outreach', view=key, show=show_filter) }}">{{ label }} <span>{{ counts[key] }}</span></a>
+    <a class="chip {{ 'on' if view == key }}" href="{{ url_for('outreach', view=key, show=show_filter, who=who if who != 'me' else None) }}">{{ label }} <span>{{ counts[key] }}</span></a>
   {% endfor %}
   <span class="grow"></span>
+  {% if user.is_admin %}
+  <form method="get" style="min-width:170px"><input type="hidden" name="view" value="{{ view }}">
+    <select name="who" onchange="this.form.submit()" style="margin:0;border-radius:999px;padding:7px 14px">
+      <option value="me" {% if who == 'me' %}selected{% endif %}>My outreach</option>
+      <option value="all" {% if who == 'all' %}selected{% endif %}>Whole team</option>
+      {% for t in team %}{% if t.id != user.id %}<option value="{{ t.id }}" {% if who == t.id|string %}selected{% endif %}>{{ display_name(t) }}</option>{% endif %}{% endfor %}
+    </select></form>
+  {% endif %}
   {% if shows|length > 1 or show_filter %}
   <form method="get" style="min-width:220px"><input type="hidden" name="view" value="{{ view }}">
     <select name="show" onchange="this.form.submit()" style="margin:0;border-radius:999px;padding:7px 14px">
@@ -46,13 +54,16 @@
     <div class="company-head">
       {% if view == 'review' or view == 'scheduled' %}<label class="check"><input type="checkbox" class="co" checked></label>{% endif %}
       <div>
-        <h3>{{ gp.company }}</h3>
+        <h3><a href="{{ url_for('company_page', key=gp.name_key) }}" style="text-decoration:none">{{ gp.company }}</a></h3>
         <div class="meta">
-          <a href="{{ url_for('show_page', show_id=gp.show_id) }}">{{ gp.show }}</a>{% if gp.show_date %} · {{ gp.show_date|nicedate }}{% endif %}
-          {% if gp.booth %} · booth {{ gp.booth }}{% endif %}{% if gp.booth_sqft %} · {{ gp.booth_sqft|thousands }} sq ft{% if gp.booth_dims %} ({{ gp.booth_dims }}){% endif %}{% endif %}
-          {% if gp.employees %} · {{ gp.employees|thousands }} staff{% endif %}{% if gp.industry %} · {{ gp.industry }}{% endif %}
+          {% if gp.show %}<a href="{{ url_for('show_page', show_id=gp.show_id) }}">{{ gp.show }}</a>{% if gp.show_date %} · {{ gp.show_date|nicedate }}{% endif %}
+          {% if gp.booth %} · booth {{ gp.booth }}{% endif %}{% if gp.booth_sqft %} · {{ gp.booth_sqft|m2 }}{% endif %}{% endif %}
+          {% if gp.industry_name %}{% if gp.show %} · {% endif %}<a href="{{ url_for('industry_page', iid=gp.industry_id) }}">{{ gp.industry_name }} campaign</a>{% endif %}
+          {% if gp.employees %} · {{ gp.employees|thousands }} staff{% endif %}{% if gp.growing == 'growing' %} · growing{% endif %}
           {% if gp.domain %} · <a href="https://{{ gp.domain }}" target="_blank" rel="noopener">{{ gp.domain }}</a>{% endif %}
+          {% if user.is_admin and gp.owner_name %} · <b style="font-weight:500">{{ gp.owner_name }}</b>{% endif %}
         </div>
+        {% if gp.annual or gp.biggest %}<div class="meta">Account: {{ gp.show_count }} upcoming show{{ 's' if gp.show_count != 1 }}{% if gp.biggest %}, biggest stand {{ '{:,.0f}'.format(gp.biggest.sqm) }} m² ({{ gp.biggest.show }}){% endif %}{% if gp.annual %} · est. <b style="font-weight:500">{{ gp.annual|money }}</b> over 12 months{% endif %}</div>{% endif %}
       </div>
       {% if gp.score is not none %}<div class="score"><b>{{ gp.score }}</b><span>score</span></div>{% endif %}
     </div>

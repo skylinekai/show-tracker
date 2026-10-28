@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Companies{% endblock %}
+{% block content %}
+<div class="titlerow">
+  <div>
+    <h1>Companies</h1>
+    <p class="lede">Every exhibitor and industry prospect as an account, ranked by estimated stand spend over the next year:
+      every upcoming stand × £{{ conf.rate_low }}–{{ conf.rate_high }} per m². A small booth at one show still counts if they take a big stand elsewhere.</p>
+  </div>
+</div>
+
+<div class="chips">
+  {% for key, label in [('qualified', 'Worth £' ~ (conf.min_project_value // 1000) ~ 'k+'), ('priority', 'London & Birmingham'), ('multi', '2+ shows'), ('all', 'Everyone')] %}
+  <a class="chip {{ 'on' if only == key }}" href="{{ url_for('companies_page', only=key, q=q or None, who=who if who != 'all' else None, industry=industry_id) }}">{{ label }}</a>
+  {% endfor %}
+  <a class="chip {{ 'on' if who == 'me' }}" href="{{ url_for('companies_page', only=only, q=q or None, who='all' if who == 'me' else 'me', industry=industry_id) }}">Mine</a>
+  <span class="grow"></span>
+  {% if industries %}
+  <form method="get" style="min-width:180px"><input type="hidden" name="only" value="{{ only }}"><input type="hidden" name="q" value="{{ q }}">
+    <select name="industry" onchange="this.form.submit()" style="margin:0;border-radius:999px;padding:7px 14px">
+      <option value="">All industries</option>
+      {% for i in industries %}<option value="{{ i.id }}" {% if industry_id == i.id %}selected{% endif %}>{{ i.name }}</option>{% endfor %}
+    </select></form>
+  {% endif %}
+  <form class="search" method="get" style="margin-left:0"><input type="hidden" name="only" value="{{ only }}"><input name="q" value="{{ q }}" placeholder="Search companies"></form>
+</div>
+<p class="small" style="margin:-4px 0 12px">{{ total|thousands }} compan{{ 'ies' if total != 1 else 'y' }}{% if total > rows|length %}, showing the top {{ rows|length }}{% endif %}.</p>
+
+{% if rows %}
+<div class="card flush">
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Company</th><th class="num">Shows</th><th class="num">Biggest stand</th>
+    <th class="num">Est. 12 months</th><th class="num">Est. GP</th><th class="num">Staff</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for a in rows %}
+    {% set c = a.company %}
+    <tr data-href="{{ url_for('company_page', key=a.key) }}">
+      <td class="name" style="min-width:240px"><a href="{{ url_for('company_page', key=a.key) }}">{{ a.name }}</a>{% if a.priority %}<span class="tag navy">London/Bham</span>{% endif %}
+        <small>{% if c and c.industry %}{{ c.industry }}{% endif %}
+        {% if c %}{% if c.growing == 'growing' %} · <span style="color:var(--green)">growing</span>{% elif c.growing == 'shrinking' %} · <span style="color:var(--red)">shrinking</span>{% endif %}{% if c.marketing_roles %} · <span style="color:var(--blue)">hiring marketing</span>{% endif %}{% if c.funding_date and c.funding_date >= '2025' %} · <span style="color:var(--amber)">funded {{ c.funding_date[:7] }}</span>{% endif %}{% endif %}</small></td>
+      <td class="num">{{ a.show_count or '–' }}</td>
+      <td class="num nowrap">{% if a.best %}{{ '{:,.0f}'.format(a.best.sqm) }} m² · {{ a.best_value|moneyrange }}<small>{{ a.best.show }}</small>{% else %}<span class="faint">unknown</span>{% endif %}</td>
+      <td class="num nowrap"><b style="font-weight:500">{{ a.annual|money or '–' }}</b></td>
+      <td class="num nowrap">{{ a.annual_gp|money or '–' }}</td>
+      <td class="num">{{ c.employees|thousands if c and c.employees else '' }}</td>
+      <td class="nowrap small">
+        {% if 'replied' in a.statuses %}<span class="pill ok">Replied</span>
+        {% elif 'sent' in a.statuses %}<span class="pill ok">In sequence</span>
+        {% elif 'review' in a.statuses or 'approved' in a.statuses %}<span class="pill run">In outreach</span>
+        {% endif %}
+        {% if user.is_admin %}{% for o in a.owners %}{% if team.get(o) %}<small>{{ team[o] }}</small>{% endif %}{% endfor %}{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</div>
+{% else %}
+<p class="empty">No companies match. Track some shows or start an industry campaign; companies appear here as they're found.</p>
+{% endif %}
+{% endblock %}

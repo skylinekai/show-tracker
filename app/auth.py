@@ -14,7 +14,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from .db import connect, now
 
 MIN_PASSWORD = 8
-USER_COLS = "id, email, name, job_title, phone, is_admin, created_at, last_login_at"
+USER_COLS = "id, email, name, job_title, phone, is_admin, created_at, last_login_at, mailbox, sequence_id, briefing"
 
 
 def secret_key() -> str:
@@ -122,6 +122,22 @@ def list_users() -> list[dict]:
         return db.all(f"SELECT {USER_COLS} FROM users ORDER BY COALESCE(name, email)")
 
 
-def delete_user(user_id: int) -> None:
+def update_outreach(user_id: int, *, mailbox: str, sequence_id: str, briefing: bool) -> None:
     with connect() as db:
+        db.execute("UPDATE users SET mailbox = ?, sequence_id = ?, briefing = ? WHERE id = ?",
+                   (mailbox.strip().lower() or None, sequence_id.strip() or None, 1 if briefing else 0, user_id))
+
+
+def delete_user(user_id: int, hand_to: int | None = None) -> None:
+    """Remove a user; their shows and pending outreach pass to hand_to (or become unassigned)."""
+    with connect() as db:
+        db.execute("UPDATE shows SET owner_id = ? WHERE owner_id = ?", (hand_to, user_id))
+        db.execute("UPDATE leads SET owner_id = ? WHERE owner_id = ? AND status IN ('review', 'approved')",
+                   (hand_to, user_id))
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+def display_name(user: dict | None) -> str:
+    if not user:
+        return "Unassigned"
+    return user.get("name") or user["email"].split("@")[0]

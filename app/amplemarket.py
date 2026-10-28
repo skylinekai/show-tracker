@@ -66,9 +66,27 @@ def list_sequences() -> list[dict]:
     return out
 
 
-def add_leads(sequence_id: str, leads: list[dict]) -> dict:
-    """leads: [{"email": ..., "linkedin_url": ..., "data": {...}}]  (max 250 per call)"""
-    return _request("POST", f"/sequences/{sequence_id}/leads", json={"leads": leads}).json()
+def add_leads(sequence_id: str, leads: list[dict], mailbox: str | None = None) -> dict:
+    """leads: [{"email": ..., "linkedin_url": ..., "data": {...}}]  (max 250 per call).
+    With a mailbox, the emails go out from that salesperson's own connected mailbox."""
+    body: dict = {"leads": leads}
+    if mailbox:
+        body["settings"] = {"leads_distribution": "custom_mailboxes", "mailboxes": [mailbox]}
+    return _request("POST", f"/sequences/{sequence_id}/leads", json=body).json()
+
+
+def list_mailboxes() -> list[dict]:
+    out, url, params = [], "/mailboxes", {"page[size]": 20}
+    while url:
+        data = _request("GET", url, params=params).json()
+        params = None  # the next link already carries the paging
+        for m in data.get("mailboxes") or []:
+            out.append({"email": (m.get("email") or "").lower(), "status": m.get("status") or "",
+                        "owner": ((m.get("user") or {}).get("email") or "").lower(),
+                        "owner_name": (m.get("user") or {}).get("name") or ""})
+        nxt = ((data.get("_links") or {}).get("next") or {}).get("href")
+        url = nxt if nxt and nxt != url else None
+    return out
 
 
 # ---------------------------------------------------------------- people
@@ -122,3 +140,62 @@ def validate_emails(emails: list[str], max_wait: float = 180) -> dict[str, str]:
             break
         data = _request("GET", nxt).json()
     return {e.lower(): results.get(e.lower(), "unknown") for e in emails}
+
+
+# ---------------------------------------------------------------- companies
+def find_company(domain: str = "", linkedin_url: str = "") -> dict:
+    params = {"domain": domain} if domain else {"linkedin_url": linkedin_url}
+    if not any(params.values()):
+        return {}
+    data = _request("GET", "/companies/find", params=params).json()
+    return data.get("company") or data
+
+
+def search_companies(*, industries=(), keywords=(), locations=(), sizes=(), domains=(), growth: dict | None = None,
+                     last_funding: dict | None = None, job_openings: dict | None = None,
+                     page: int = 1, page_size: int = 50) -> tuple[list[dict], int]:
+    """Returns (companies, total matches)."""
+    body: dict = {"page": page, "page_size": max(1, min(page_size, 50))}
+    if last_funding:
+        body["company_last_funding"] = last_funding
+    if job_openings:
+        body["job_openings"] = job_openings
+    for key, val in (("company_industries", industries), ("company_keywords", keywords),
+                     ("company_locations", locations), ("company_sizes", sizes), ("company_domains", domains)):
+        if val:
+            body[key] = list(val)
+    if growth:
+        body["headcount_growth"] = growth
+    data = _request("POST", "/companies/search", json=body).json()
+    total = (data.get("_pagination") or {}).get("total") or len(data.get("results") or [])
+    return data.get("results") or [], int(total)
+
+
+def headcount_growth(domain: str) -> str | None:
+    """'growing' (10%+ in 12 months), 'shrinking' (-10% or worse), 'steady', or None if unknown."""
+    if not domain:
+        return None
+    try:
+        up, _ = search_companies(domains=[domain], page_size=1,
+                                 growth={"growth_rates": [{"min": 10, "max": 10000}], "time_frame_in_months": 12})
+        if up:
+            return "growing"
+        down, _ = search_companies(domains=[domain], page_size=1,
+                                   growth={"growth_rates": [{"min": -100, "max": -10}], "time_frame_in_months": 12})
+        return "shrinking" if down else "steady"
+    except AmplemarketError:
+        return None
+
+
+MARKETING_ROLE = ("market", "event", "brand", "exhibit", "trade show", "communications", "pr ")
+
+
+def job_openings(domain: str) -> tuple[int, list[str]]:
+    """(number of open roles, titles of open marketing/events roles)."""
+    if not domain:
+        return 0, []
+    data = _request("GET", "/job-openings", params={"domain": domain, "page[size]": 100}).json()
+    jobs = data.get("job_openings") or []
+    titles = [j.get("title") or "" for j in jobs]
+    marketing = [t for t in titles if any(k in t.lower() for k in MARKETING_ROLE)]
+    return len(jobs), marketing[:6]

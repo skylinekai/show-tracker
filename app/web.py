@@ -15,7 +15,7 @@ from flask import (Flask, Response, abort, flash, g, redirect, render_template, 
                    url_for)
 from markupsafe import Markup
 
-from . import ai, amplemarket, auth, jobs, notify, prospecting, tracker
+from . import ai, amplemarket, auth, jobs, notify, prospecting, tracker, value
 from . import settings as cfg
 from .db import connect, init_db, log_activity, now
 from .scrapers import PLATFORM_LABELS, detect_platform
@@ -23,11 +23,11 @@ from .scrapers import PLATFORM_LABELS, detect_platform
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 NEW_WINDOW_DAYS = 7
-APP_VERSION = "2026-10-28-c"
+APP_VERSION = "2026-10-28-f"
 
 app = Flask(__name__)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  PERMANENT_SESSION_LIFETIME=timedelta(days=30))
+                  PERMANENT_SESSION_LIFETIME=timedelta(days=30), MAX_CONTENT_LENGTH=40 * 1024 * 1024)
 
 PUBLIC = {"login", "healthz", "static", "amplemarket_webhook"}
 
@@ -54,9 +54,11 @@ def inject():
     review = 0
     if getattr(g, "user", None):
         with connect() as db:
-            review = db.one("SELECT COUNT(*) AS n FROM leads WHERE status = 'review'")["n"]
+            review = db.one("SELECT COUNT(*) AS n FROM leads WHERE status = 'review' AND owner_id = ?",
+                            (g.user["id"],))["n"]
     field = Markup(f'<input type="hidden" name="_csrf" value="{session["csrf"]}">')
     return {"csrf": session["csrf"], "csrf_field": field, "user": getattr(g, "user", None),
+            "display_name": auth.display_name,
             "review_count": review, "version": APP_VERSION,
             "font_kit": os.environ.get("ADOBE_FONTS_KIT", "").strip()}
 
@@ -150,12 +152,65 @@ def _status(show: dict) -> tuple[str, str]:
     return "Live", "ok"
 
 
+def _team() -> list[dict]:
+    return auth.list_users()
+
+
+def _who(default: str = "me") -> str:
+    """'me', 'all', 'unassigned' or a user id. Salespeople only ever see their own work (plus what's up for grabs);
+    managers can look at anyone's."""
+    who = request.args.get("who") or default
+    if who not in ("me", "all", "unassigned") and not who.isdigit():
+        who = default
+    if not g.user["is_admin"] and who not in ("me", "unassigned"):
+        who = "me"
+    return who
+
+
+def _norm_show(name: str) -> str:
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def show_clash(url: str, name: str) -> dict | None:
+    """An existing show with the same link or name, with its owner."""
+    with connect() as db:
+        rows = db.all("SELECT s.*, u.name AS owner_name, u.email AS owner_email FROM shows s "
+                      "LEFT JOIN users u ON u.id = s.owner_id")
+    target = _norm_show(name)
+    u = url.strip().rstrip("/").lower().replace("http://", "https://")
+    for r in rows:
+        if r["url"].rstrip("/").lower().replace("http://", "https://") == u or (target and _norm_show(r["name"]) == target):
+            return r
+    return None
+
+
+def _owner_clause(who: str, col: str) -> tuple[str, list]:
+    if who == "me":
+        return f" AND {col} = ?", [g.user["id"]]
+    if who == "unassigned":
+        return f" AND {col} IS NULL", []
+    if who.isdigit():
+        return f" AND {col} = ?", [int(who)]
+    return "", []
+
+
+def _can_manage_show(show: dict) -> bool:
+    return bool(g.user["is_admin"] or show.get("owner_id") in (None, g.user["id"]))
+
+
 def _bg(fn, *args) -> None:
     threading.Thread(target=fn, args=args, daemon=True).start()
 
 
 def _run_in_background(show_id: int) -> None:
-    _bg(tracker.check_show, show_id)
+    def run():
+        tracker.check_show(show_id)
+        with connect() as db:
+            on = db.one("SELECT prospecting FROM shows WHERE id = ?", (show_id,))
+        if on and on["prospecting"]:
+            prospecting.research_due(15)
+    _bg(run)
 
 
 def _back(default: str):
@@ -184,20 +239,35 @@ def _sequences() -> list[dict]:
 def dashboard():
     since = _since(NEW_WINDOW_DAYS)
     with connect() as db:
+        owns_any = db.one("SELECT COUNT(*) AS n FROM shows WHERE owner_id = ?", (g.user["id"],))["n"]
+    who = _who("me" if owns_any or not g.user["is_admin"] else "all")
+    show_where, show_params = _owner_clause(who, "s.owner_id")
+    lead_where, lead_params = _owner_clause("all" if who == "unassigned" else who, "owner_id")
+    with connect() as db:
         shows = db.all(
-            "SELECT s.*, "
+            "SELECT s.*, u.name AS owner_name, u.email AS owner_email, "
             " (SELECT COUNT(*) FROM exhibitors e WHERE e.show_id = s.id AND e.removed_at IS NULL AND e.likely_junk = 0) AS active_count, "
             " (SELECT COUNT(*) FROM exhibitors e WHERE e.show_id = s.id AND e.in_first_snapshot = 0 "
             "    AND e.likely_junk = 0 AND e.first_seen_at >= ?) AS new_count, "
             " (SELECT COUNT(*) FROM leads l WHERE l.show_id = s.id AND l.status IN ('sent', 'replied')) AS sent_count "
-            "FROM shows s", (since,))
+            "FROM shows s LEFT JOIN users u ON u.id = s.owner_id WHERE 1 = 1" + show_where, [since] + show_params)
+        counts = {
+            "me": db.one("SELECT COUNT(*) AS n FROM shows WHERE owner_id = ?", (g.user["id"],))["n"],
+            "all": db.one("SELECT COUNT(*) AS n FROM shows")["n"],
+            "unassigned": db.one("SELECT COUNT(*) AS n FROM shows WHERE owner_id IS NULL")["n"],
+        }
         totals = db.one("SELECT COUNT(*) AS n, COUNT(DISTINCT name_key) AS companies FROM exhibitors "
                         "WHERE removed_at IS NULL AND likely_junk = 0")
         lead_stats = db.one(
             "SELECT SUM(CASE WHEN status IN ('sent','replied') AND sent_at >= ? THEN 1 ELSE 0 END) AS sent, "
-            "SUM(CASE WHEN status = 'replied' AND replied_at >= ? THEN 1 ELSE 0 END) AS replied FROM leads",
-            (_since(30), _since(30)))
-        activity = db.all("SELECT * FROM activity ORDER BY id DESC LIMIT 12")
+            "SUM(CASE WHEN status = 'replied' AND replied_at >= ? THEN 1 ELSE 0 END) AS replied, "
+            "SUM(CASE WHEN status = 'review' THEN 1 ELSE 0 END) AS review FROM leads WHERE 1 = 1" + lead_where,
+            [_since(30), _since(30)] + lead_params)
+        if g.user["is_admin"] and who != "me":
+            activity = db.all("SELECT * FROM activity ORDER BY id DESC LIMIT 12")
+        else:
+            activity = db.all("SELECT * FROM activity WHERE user_id = ? OR user_id IS NULL ORDER BY id DESC LIMIT 12",
+                              (g.user["id"],))
         suggestions = db.one("SELECT COUNT(*) AS n FROM discovered_shows WHERE status = 'suggested'")["n"]
     for s in shows:
         s["days_until"] = prospecting.days_until(s["start_date"])
@@ -210,22 +280,97 @@ def dashboard():
         "new": sum(s["new_count"] for s in shows),
         "sent": lead_stats["sent"] or 0,
         "replied": lead_stats["replied"] or 0,
+        "review": lead_stats["review"] or 0,
     }
     return render_template("dashboard.html", shows=shows, stats=stats, window=NEW_WINDOW_DAYS, activity=activity,
-                           suggestions=suggestions, setup=jobs.briefing_data()["setup"])
+                           suggestions=suggestions, setup=jobs.briefing_data(g.user)["setup"], who=who,
+                           counts=counts, team=_team())
 
 
 @app.post("/shows")
 def create_show():
     url = (request.form.get("url") or "").strip()
+    pdf = request.files.get("floorplan")
+    if pdf and pdf.filename:
+        return _create_pdf_show(pdf)
     if not url:
+        flash("Paste the exhibitor list link, or upload the floorplan PDF.", "bad")
         return redirect(url_for("dashboard"))
+    full = url if url.startswith("http") else "https://" + url
+    clash = show_clash(full, request.form.get("name", ""))
+    if clash:
+        if clash["owner_id"] and clash["owner_id"] != g.user["id"]:
+            who = clash["owner_name"] or clash["owner_email"]
+            flash(f"{clash['name']} is already being worked by {who}. Ask them or a manager if you want it.", "bad")
+            return _back(url_for("dashboard"))
+        if not clash["owner_id"]:
+            with connect() as db:
+                db.execute("UPDATE shows SET owner_id = ? WHERE id = ?", (g.user["id"], clash["id"]))
+            flash(f"{clash['name']} was already tracked and up for grabs, so it's now yours.", "ok")
+        return redirect(url_for("show_page", show_id=clash["id"]))
     show_id = tracker.add_show(url, name=request.form.get("name", ""), start_date=request.form.get("start_date", ""),
-                               location=request.form.get("location", ""))
+                               location=request.form.get("location", ""), owner_id=g.user["id"])
+    with connect() as db:  # "Start tracking" = track it and start prospecting straight away
+        db.execute("UPDATE shows SET prospecting = 1 WHERE id = ?", (show_id,))
     if request.form.get("discovered_id"):
         with connect() as db:
+            d = db.one("SELECT industry_id FROM discovered_shows WHERE id = ?", (request.form["discovered_id"],))
             db.execute("UPDATE discovered_shows SET status = 'added' WHERE id = ?", (request.form["discovered_id"],))
+            if d and d["industry_id"]:
+                db.execute("UPDATE shows SET industry_id = ? WHERE id = ?", (d["industry_id"], show_id))
     _run_in_background(show_id)
+    return redirect(url_for("show_page", show_id=show_id))
+
+
+def _read_pdf(upload) -> bytes | None:
+    data = upload.read()
+    if not data.startswith(b"%PDF"):
+        flash("That file isn't a PDF.", "bad")
+        return None
+    return data
+
+
+def _create_pdf_show(upload):
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Give the show a name when uploading a floorplan.", "bad")
+        return redirect(url_for("dashboard"))
+    clash = show_clash("pdf://none", name)
+    if clash and clash["owner_id"] not in (None, g.user["id"]):
+        flash(f"{clash['name']} is already being worked by {clash['owner_name'] or clash['owner_email']}.", "bad")
+        return redirect(url_for("dashboard"))
+    data = _read_pdf(upload)
+    if data is None:
+        return redirect(url_for("dashboard"))
+    if clash:  # same show already tracked by you (or unclaimed): treat as a newer floorplan
+        tracker.add_floorplan(clash["id"], data, upload.filename, g.user["id"])
+        with connect() as db:
+            db.execute("UPDATE shows SET owner_id = ?, prospecting = 1 WHERE id = ?", (g.user["id"], clash["id"]))
+        _run_in_background(clash["id"])
+        flash("Added as a newer floorplan for this show; new exhibitors will be flagged.", "ok")
+        return redirect(url_for("show_page", show_id=clash["id"]))
+    sid = tracker.add_pdf_show(data, upload.filename, name, request.form.get("start_date", ""),
+                               request.form.get("location", ""), g.user["id"])
+    with connect() as db:
+        db.execute("UPDATE shows SET prospecting = 1 WHERE id = ?", (sid,))
+    _run_in_background(sid)
+    flash("Reading the floorplan. A big one can take a few minutes; this page refreshes itself.", "ok")
+    return redirect(url_for("show_page", show_id=sid))
+
+
+@app.post("/shows/<int:show_id>/floorplan")
+def upload_floorplan(show_id: int):
+    _show_or_403(show_id)
+    upload = request.files.get("floorplan")
+    if not upload or not upload.filename:
+        flash("Choose a PDF to upload.", "bad")
+        return redirect(url_for("show_page", show_id=show_id))
+    data = _read_pdf(upload)
+    if data is None:
+        return redirect(url_for("show_page", show_id=show_id))
+    tracker.add_floorplan(show_id, data, upload.filename, g.user["id"])
+    _run_in_background(show_id)
+    flash("Reading the new floorplan. Exhibitors that weren't on the last one will be flagged as new.", "ok")
     return redirect(url_for("show_page", show_id=show_id))
 
 
@@ -233,7 +378,7 @@ EXH_VIEWS = {
     "all": ("All", "e.removed_at IS NULL AND e.likely_junk = 0"),
     "new": ("New", "e.in_first_snapshot = 0 AND e.likely_junk = 0 AND e.first_seen_at >= :since"),
     "queued": ("Prospects", "e.stage = 'queued'"),
-    "skipped": ("Skipped", "e.stage IN ('skipped', 'low_score', 'not_found', 'no_contacts')"),
+    "skipped": ("Skipped", "e.stage IN ('skipped', 'low_score', 'not_found', 'no_contacts', 'teammate')"),
     "removed": ("Dropped out", "e.removed_at IS NOT NULL"),
     "junk": ("Not companies", "e.likely_junk = 1 AND e.removed_at IS NULL"),
 }
@@ -248,9 +393,13 @@ def show_page(show_id: int):
     sort = request.args.get("sort", "booth" if view in ("all", "queued") else "name")
     since = _since(NEW_WINDOW_DAYS)
     with connect() as db:
-        show = db.one("SELECT * FROM shows WHERE id = ?", (show_id,))
+        show = db.one("SELECT s.*, u.name AS owner_name, u.email AS owner_email FROM shows s "
+                      "LEFT JOIN users u ON u.id = s.owner_id WHERE s.id = ?", (show_id,))
         if not show:
             abort(404)
+        if not _can_manage_show(show):
+            flash(f"{show['name']} is being worked by {show['owner_name'] or show['owner_email']}.", "warn")
+            return redirect(url_for("dashboard"))
         counts = {}
         for key, (_, cond) in EXH_VIEWS.items():
             counts[key] = db.one(f"SELECT COUNT(*) AS n FROM exhibitors e WHERE e.show_id = ? AND {cond.replace(':since', '?')}",
@@ -268,6 +417,8 @@ def show_page(show_id: int):
             f"FROM exhibitors e WHERE e.show_id = ? AND {where} ORDER BY {order}", params)
         runs = db.all("SELECT * FROM runs WHERE show_id = ? ORDER BY id DESC LIMIT 10", (show_id,))
         parent = db.one("SELECT id, name FROM shows WHERE id = ?", (show["parent_show_id"],)) if show["parent_show_id"] else None
+        files = db.all("SELECT id, filename, uploaded_at, extracted_at, error FROM show_files WHERE show_id = ? "
+                       "ORDER BY id DESC", (show_id,))
         child = db.one("SELECT id, name FROM shows WHERE parent_show_id = ?", (show_id,))
         funnel = db.one(
             "SELECT SUM(CASE WHEN stage IS NOT NULL THEN 1 ELSE 0 END) AS looked, "
@@ -278,6 +429,18 @@ def show_page(show_id: int):
     show["days_until"] = prospecting.days_until(show["start_date"])
     show["platform_label"] = PLATFORM_LABELS.get(show["platform"], show["platform"])
     conf = cfg.all_settings()
+    keys = list({r["name_key"] for r in rows})
+    others: dict = {}
+    if keys:
+        with connect() as db:
+            for chunk in range(0, len(keys), 500):
+                part = keys[chunk:chunk + 500]
+                for r in db.all(f"SELECT name_key, COUNT(DISTINCT show_id) AS n FROM exhibitors WHERE name_key IN "
+                                f"({','.join('?' * len(part))}) AND removed_at IS NULL GROUP BY name_key", part):
+                    others[r["name_key"]] = r["n"] - 1
+    for r in rows:
+        r["other_shows"] = others.get(r["name_key"], 0)
+        r["value"] = value.stand_value(value.sqm(r["booth_sqft"]), conf, value.is_outsourced(show, conf))
     window = None
     if show["days_until"] is not None:
         window = {"opens_in": show["days_until"] - conf["window_start_days"],
@@ -285,7 +448,37 @@ def show_page(show_id: int):
     return render_template("show.html", show=show, rows=rows, view=view, q=q, sort=sort, counts=counts, runs=runs,
                            views=EXH_VIEWS, window_days=NEW_WINDOW_DAYS, parent=parent, child=child,
                            funnel=funnel, lead_counts=lead_counts, outreach_window=window,
-                           sequences=_sequences() if show["prospecting"] else [], conf=conf)
+                           sequences=_sequences() if show["prospecting"] else [], conf=conf,
+                           can_manage=_can_manage_show(show), team=_team(), industries=_industries(), files=files,
+                           priority=value.is_priority(show, conf))
+
+
+def _industries() -> list[dict]:
+    with connect() as db:
+        return db.all("SELECT id, name FROM industries ORDER BY name")
+
+
+@app.post("/shows/<int:show_id>/owner")
+def show_owner(show_id: int):
+    with connect() as db:
+        show = db.one("SELECT * FROM shows WHERE id = ?", (show_id,))
+        if not show:
+            abort(404)
+        new_owner = request.form.get("owner_id", "")
+        if not g.user["is_admin"]:
+            if show["owner_id"] not in (None, g.user["id"]):
+                abort(403)
+            new_owner = str(g.user["id"]) if new_owner == "me" else ""
+        owner_id = int(new_owner) if new_owner.isdigit() else None
+        db.execute("UPDATE shows SET owner_id = ? WHERE id = ?", (owner_id, show_id))
+        # pending outreach moves with the show; anything already sent stays with whoever sent it
+        db.execute("UPDATE leads SET owner_id = ? WHERE show_id = ? AND status IN ('review', 'approved')",
+                   (owner_id, show_id))
+        who = db.one("SELECT name, email FROM users WHERE id = ?", (owner_id,)) if owner_id else None
+    log_activity("owner", f"{show['name']} is now {'with ' + auth.display_name(who) if who else 'unassigned'}",
+                 f"show:{show_id}", owner_id)
+    flash(f"{show['name']} is now " + (f"assigned to {auth.display_name(who)}." if who else "unassigned."), "ok")
+    return redirect(url_for("show_page", show_id=show_id))
 
 
 @app.post("/shows/<int:show_id>/check")
@@ -294,8 +487,19 @@ def check_now(show_id: int):
     return _back(url_for("show_page", show_id=show_id))
 
 
+def _show_or_403(show_id: int) -> dict:
+    with connect() as db:
+        show = db.one("SELECT * FROM shows WHERE id = ?", (show_id,))
+    if not show:
+        abort(404)
+    if not _can_manage_show(show):
+        abort(403, "This show belongs to someone else. Ask a manager to reassign it.")
+    return show
+
+
 @app.post("/shows/<int:show_id>/edit")
 def edit_show(show_id: int):
+    _show_or_403(show_id)
     url = (request.form.get("url") or "").strip()
     with connect() as db:
         db.execute("UPDATE shows SET name = ?, start_date = ?, location = ?, url = ?, platform = ? WHERE id = ?",
@@ -307,14 +511,20 @@ def edit_show(show_id: int):
 
 @app.post("/shows/<int:show_id>/prospecting")
 def show_prospecting(show_id: int):
+    show = _show_or_403(show_id)
     on = request.form.get("prospecting") == "1"
     with connect() as db:
-        db.execute("UPDATE shows SET prospecting = ?, auto_send = ?, sequence_id = ? WHERE id = ?",
+        if on and show["owner_id"] is None:  # switching on prospecting claims an unassigned show
+            db.execute("UPDATE shows SET owner_id = ? WHERE id = ?", (g.user["id"], show_id))
+        db.execute("UPDATE shows SET prospecting = ?, auto_send = ?, auto_send_new = ?, sequence_id = ? WHERE id = ?",
                    (1 if on else 0, 1 if request.form.get("auto_send") == "1" else 0,
+                    1 if request.form.get("auto_send_new") == "1" or "auto_send_new" not in request.form and
+                    request.form.get("was_on") != "1" else 0,
                     request.form.get("sequence_id") or None, show_id))
         name = db.one("SELECT name FROM shows WHERE id = ?", (show_id,))["name"]
     if on and request.form.get("was_on") != "1":
-        log_activity("prospecting", f"{g.user['email']} turned on prospecting for {name}", f"show:{show_id}")
+        log_activity("prospecting", f"{auth.display_name(g.user)} turned on prospecting for {name}", f"show:{show_id}",
+                     show["owner_id"] or g.user["id"])
         flash("Prospecting is on. The best-fit exhibitors are researched first, within your daily limit; "
               "they'll appear in Outreach as they're ready.", "ok")
         _bg(prospecting.research_due, 10)
@@ -325,6 +535,7 @@ def show_prospecting(show_id: int):
 
 @app.post("/shows/<int:show_id>/toggle")
 def toggle_show(show_id: int):
+    _show_or_403(show_id)
     with connect() as db:
         db.execute("UPDATE shows SET active = 1 - active WHERE id = ?", (show_id,))
     return redirect(url_for("show_page", show_id=show_id))
@@ -332,6 +543,7 @@ def toggle_show(show_id: int):
 
 @app.post("/shows/<int:show_id>/delete")
 def delete_show(show_id: int):
+    _show_or_403(show_id)
     with connect() as db:
         db.execute("DELETE FROM leads WHERE show_id = ?", (show_id,))
         db.execute("DELETE FROM runs WHERE show_id = ?", (show_id,))
@@ -349,6 +561,11 @@ def research_one(ex_id: int):
         if not ex:
             abort(404)
         show = db.one("SELECT * FROM shows WHERE id = ?", (ex["show_id"],))
+        if not _can_manage_show(show):
+            abort(403, "This show belongs to someone else.")
+        if show["owner_id"] is None:
+            db.execute("UPDATE shows SET owner_id = ? WHERE id = ?", (g.user["id"], show["id"]))
+            show["owner_id"] = g.user["id"]
         db.execute("UPDATE exhibitors SET stage = NULL WHERE id = ?", (ex_id,))
     ex["stage"] = None
     try:
@@ -369,10 +586,15 @@ def research_one(ex_id: int):
 def new_feed():
     days = max(1, min(request.args.get("days", NEW_WINDOW_DAYS, type=int) or NEW_WINDOW_DAYS, 365))
     with connect() as db:
+        owns_any = db.one("SELECT COUNT(*) AS n FROM shows WHERE owner_id = ?", (g.user["id"],))["n"]
+    who = _who("me" if owns_any or not g.user["is_admin"] else "all")
+    extra, params = _owner_clause(who, "s.owner_id")
+    with connect() as db:
         rows = db.all(
-            "SELECT e.*, s.name AS show_name, s.start_date AS show_date FROM exhibitors e "
-            "JOIN shows s ON s.id = e.show_id WHERE e.in_first_snapshot = 0 AND e.likely_junk = 0 AND e.first_seen_at >= ? "
-            "ORDER BY e.first_seen_at DESC, COALESCE(e.booth_sqft, 0) DESC, e.name", (_since(days),))
+            "SELECT e.*, s.name AS show_name, s.start_date AS show_date, s.owner_id, u.name AS owner_name FROM exhibitors e "
+            "JOIN shows s ON s.id = e.show_id LEFT JOIN users u ON u.id = s.owner_id "
+            "WHERE e.in_first_snapshot = 0 AND e.likely_junk = 0 AND e.first_seen_at >= ?" + extra +
+            " ORDER BY e.first_seen_at DESC, COALESCE(e.booth_sqft, 0) DESC, e.name", [_since(days)] + params)
         keys = list({r["name_key"] for r in rows})
         other = {}
         if keys:
@@ -382,7 +604,7 @@ def new_feed():
                 other[r["name_key"]] = r["n"] - 1
     for r in rows:
         r["other_shows"] = other.get(r["name_key"], 0)
-    return render_template("new.html", rows=rows, days=days)
+    return render_template("new.html", rows=rows, days=days, who=who)
 
 
 # ---------------------------------------------------------------- outreach
@@ -401,9 +623,15 @@ def outreach():
     if view not in LEAD_VIEWS:
         view = "review"
     show_filter = request.args.get("show", type=int)
+    who = _who("me") if g.user["is_admin"] else "me"
+    mine, mine_p = _owner_clause(who, "l.owner_id")
     with connect() as db:
-        counts = {k: db.one(f"SELECT COUNT(*) AS n FROM leads l WHERE {cond}")["n"] for k, (_, cond) in LEAD_VIEWS.items()}
-        where, params = LEAD_VIEWS[view][1], []
+        counts = {k: db.one(f"SELECT COUNT(*) AS n FROM leads l WHERE {cond}{mine}", mine_p)["n"]
+                  for k, (_, cond) in LEAD_VIEWS.items()}
+        where, params = LEAD_VIEWS[view][1] + mine, list(mine_p)
+        if request.args.get("q"):
+            where += " AND LOWER(co.name) LIKE ?"
+            params.append(f"%{request.args['q'].lower()}%")
         if show_filter:
             where += " AND l.show_id = ?"
             params.append(show_filter)
@@ -411,29 +639,36 @@ def outreach():
             "s.start_date, l.score DESC, co.name"
         leads = db.all(prospecting.LEAD_QUERY + f" WHERE {where} ORDER BY {order} LIMIT 300", params)
         shows = db.all("SELECT s.id, s.name, COUNT(l.id) AS n FROM shows s JOIN leads l ON l.show_id = s.id "
-                       f"WHERE {LEAD_VIEWS[view][1]} GROUP BY s.id, s.name ORDER BY s.name")
-    groups: list[dict] = []
-    for lead in leads:
-        if not groups or groups[-1]["key"] != (lead["company_id"], lead["show_id"]):
-            groups.append({"key": (lead["company_id"], lead["show_id"]), "company": lead["company_name"],
-                           "show": lead["show_name"], "show_id": lead["show_id"], "show_date": lead["show_date"],
-                           "booth": lead["booth"], "booth_sqft": lead["booth_sqft"], "booth_dims": lead["booth_dims"],
-                           "domain": lead["domain"], "employees": lead["employees"], "industry": lead["industry"],
-                           "score": lead["score"], "score_notes": lead["score_notes"], "leads": []})
-        groups[-1]["leads"].append(lead)
+                       f"WHERE {LEAD_VIEWS[view][1]}{mine} GROUP BY s.id, s.name ORDER BY s.name", mine_p)
     conf = cfg.all_settings()
+    groups: list[dict] = []
+    accounts: dict = {}
+    for lead in leads:
+        if not groups or groups[-1]["key"] != (lead["company_id"], lead["show_id"], lead["industry_id"]):
+            if lead["name_key"] not in accounts:
+                accounts[lead["name_key"]] = value.account(lead["name_key"], conf)
+            acct = accounts[lead["name_key"]]
+            groups.append({"key": (lead["company_id"], lead["show_id"], lead["industry_id"]), "company": lead["company_name"],
+                           "name_key": lead["name_key"], "show": lead["show_name"], "show_id": lead["show_id"],
+                           "show_date": lead["show_date"], "industry_name": lead["industry_name"],
+                           "industry_id": lead["industry_id"], "booth": lead["booth"], "booth_sqft": lead["booth_sqft"],
+                           "domain": lead["domain"], "employees": lead["employees"], "industry": lead["industry"],
+                           "growing": lead["growing"], "score": lead["score"], "score_notes": lead["score_notes"],
+                           "annual": acct["annual_value"], "show_count": acct["show_count"],
+                           "biggest": acct["biggest"], "owner_name": lead["owner_name"], "leads": []})
+        groups[-1]["leads"].append(lead)
     return render_template("outreach.html", view=view, views=LEAD_VIEWS, counts=counts, groups=groups, shows=shows,
                            show_filter=show_filter, conf=conf, done_today=prospecting.research_done_today(),
                            am_ok=amplemarket.configured(), ai_ok=ai.configured(),
-                           today=date.today().isoformat())
+                           today=date.today().isoformat(), who=who, team=_team())
 
 
 @app.post("/outreach/decide")
 def outreach_decide():
-    ids = [int(x) for x in request.form.getlist("lead") if x.isdigit()]
+    ids = prospecting.owned_by([int(x) for x in request.form.getlist("lead") if x.isdigit()], g.user)
     action = request.form.get("action")
     if action == "approve":
-        n = prospecting.approve(ids, g.user["email"])
+        n = prospecting.approve(ids, auth.display_name(g.user))
         flash(f"Approved {n} contact{'s' if n != 1 else ''}. They go into Amplemarket when the show's outreach window opens.", "ok")
         _bg(prospecting.send_due)
     elif action == "reject":
@@ -444,6 +679,8 @@ def outreach_decide():
 
 @app.post("/leads/<int:lead_id>/edit")
 def lead_edit(lead_id: int):
+    if not prospecting.owned_by([lead_id], g.user):
+        abort(403)
     with connect() as db:
         db.execute("UPDATE leads SET subject = ?, opener = ? WHERE id = ? AND status IN ('review', 'approved')",
                    (request.form.get("subject", "").strip()[:120], request.form.get("opener", "").strip()[:700], lead_id))
@@ -455,6 +692,8 @@ def lead_edit(lead_id: int):
 
 @app.post("/leads/<int:lead_id>/rewrite")
 def lead_rewrite(lead_id: int):
+    if not prospecting.owned_by([lead_id], g.user):
+        abort(403)
     try:
         prospecting.rewrite(lead_id)
         flash("Rewritten.", "ok")
@@ -520,6 +759,7 @@ def discover_dismiss(did: int):
 
 # ---------------------------------------------------------------- settings
 @app.route("/settings", methods=["GET", "POST"])
+@admin_required
 def settings_page():
     if request.method == "POST":
         values = {}
@@ -553,23 +793,39 @@ def settings_page():
 
 @app.post("/settings/test-briefing")
 def test_briefing():
-    to = [t for t in str(cfg.get("briefing_to") or "").split(",") if t.strip()] or [g.user["email"]]
-    subject, body = jobs.build_briefing()
+    to = [g.user["email"]]
+    subject, body = jobs.build_briefing(g.user)
     ok = notify.send_email(to, subject, notify.wrap_email(subject, body))
     flash(f"Briefing sent to {', '.join(to)}." if ok else
           "Couldn't send. Check the SMTP settings on Render (see the README).", "ok" if ok else "bad")
-    return redirect(url_for("settings_page"))
+    return _back(url_for("me"))
 
 
 @app.post("/settings/refresh-sequences")
 def refresh_sequences():
     cfg.set_internal("_sequences_cache", None)
-    return redirect(url_for("settings_page"))
+    cfg.set_internal("_mailboxes_cache", None)
+    return _back(url_for("me"))
+
+
+def _mailboxes() -> list[dict]:
+    cached = cfg.internal("_mailboxes_cache")
+    if cached and time.time() - cached.get("at", 0) < 600:
+        return cached["items"]
+    if not amplemarket.configured():
+        return []
+    try:
+        items = amplemarket.list_mailboxes()
+    except amplemarket.AmplemarketError as exc:
+        flash(f"Couldn't load mailboxes from Amplemarket: {exc}", "bad")
+        return []
+    cfg.set_internal("_mailboxes_cache", {"at": time.time(), "items": items})
+    return items
 
 
 @app.get("/briefing")
 def briefing_preview():
-    subject, body = jobs.build_briefing()
+    subject, body = jobs.build_briefing(None if request.args.get("team") and g.user["is_admin"] else g.user)
     return notify.wrap_email(subject, body)
 
 
@@ -608,10 +864,12 @@ def users_page():
                                            " Send them their email and password yourself."), "ok")
         except ValueError as exc:
             flash(str(exc), "bad")
-            return render_template("users.html", users=auth.list_users(), form=f, email_ok=notify.email_configured(),
+            return render_template("users.html", users=auth.list_users(), form=f, email_ok=notify.email_configured(), owned={},
                                    min_pw=auth.MIN_PASSWORD, editing=None)
         return redirect(url_for("users_page"))
-    return render_template("users.html", users=auth.list_users(), form={}, email_ok=notify.email_configured(),
+    with connect() as db:
+        owned = {r["owner_id"]: r["n"] for r in db.all("SELECT owner_id, COUNT(*) AS n FROM shows GROUP BY owner_id")}
+    return render_template("users.html", users=auth.list_users(), form={}, email_ok=notify.email_configured(), owned=owned,
                            min_pw=auth.MIN_PASSWORD, editing=request.args.get("edit", type=int),
                            reset=request.args.get("reset", type=int))
 
@@ -637,8 +895,8 @@ def users_delete(uid: int):
     if uid == g.user["id"]:
         flash("You can't remove yourself.", "bad")
     else:
-        auth.delete_user(uid)
-        flash("User removed.", "ok")
+        auth.delete_user(uid, hand_to=g.user["id"])
+        flash("User removed. Their shows and any outreach waiting for approval are now yours to reassign.", "ok")
     return redirect(url_for("users_page"))
 
 
@@ -658,7 +916,11 @@ def users_password(uid: int):
 def me():
     if request.method == "POST":
         f = request.form
-        if f.get("form") == "details":
+        if f.get("form") == "outreach":
+            auth.update_outreach(g.user["id"], mailbox=f.get("mailbox", ""), sequence_id=f.get("sequence_id", ""),
+                                 briefing=f.get("briefing") == "1")
+            flash("Saved.", "ok")
+        elif f.get("form") == "details":
             if not f.get("name", "").strip() or not f.get("job_title", "").strip() or not f.get("phone", "").strip():
                 flash("Name, job title and contact number are all needed.", "bad")
             else:
@@ -676,7 +938,11 @@ def me():
                 except ValueError as exc:
                     flash(str(exc), "bad")
         return redirect(url_for("me"))
-    return render_template("me.html", min_pw=auth.MIN_PASSWORD)
+    mailboxes = _mailboxes()
+    mine = [m for m in mailboxes if m["owner"] == g.user["email"]]
+    return render_template("me.html", min_pw=auth.MIN_PASSWORD, mailboxes=mailboxes, suggested=mine,
+                           sequences=_sequences(), am_ok=amplemarket.configured(),
+                           email_ok=notify.email_configured(), conf=cfg.all_settings())
 
 
 # ---------------------------------------------------------------- export & webhooks
@@ -739,3 +1005,6 @@ def create_app(start_scheduler: bool | None = None) -> Flask:
         jobs.start()
         app.config["SCHEDULER_STARTED"] = True
     return app
+
+
+from . import web_accounts  # noqa: E402,F401  (Companies and Industries pages register their routes)

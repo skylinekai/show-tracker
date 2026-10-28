@@ -88,6 +88,8 @@ def _row(name, booth="", description="", website="", profile_url="", booth_sqft=
 
 # ---------------------------------------------------------------- platform detection
 def detect_platform(url: str) -> str:
+    if url.startswith("pdf://"):
+        return "pdf"
     u = urlparse(url)
     host, path = u.netloc.lower(), u.path.lower()
     if "mapyourshow.com" in host or "/8_0/" in path:
@@ -100,6 +102,7 @@ def detect_platform(url: str) -> str:
 
 
 PLATFORM_LABELS = {
+    "pdf": "PDF floorplan",
     "mapyourshow": "Map Your Show",
     "a2z": "A2Z",
     "eshow": "eShow",
@@ -379,7 +382,36 @@ def scrape_generic(url: str, session: requests.Session | None = None) -> list[di
     return rows
 
 
+def scrape_pdf(url: str, session=None) -> list[dict]:
+    """Exhibitors from the latest uploaded floorplan for this show (read once by Claude, then cached)."""
+    import json as _json
+
+    from . import ai
+    from .db import connect, now
+
+    show_id = int(url.rsplit("/", 1)[-1])
+    with connect() as db:
+        f = db.one("SELECT * FROM show_files WHERE show_id = ? ORDER BY id DESC LIMIT 1", (show_id,))
+    if not f:
+        raise ScrapeError("No floorplan uploaded yet.")
+    if f["extracted"]:
+        rows = _json.loads(f["extracted"])
+    else:
+        try:
+            rows = ai.extract_floorplan(bytes(f["data"]), f["filename"])
+        except ai.AIError as exc:
+            with connect() as db:
+                db.execute("UPDATE show_files SET error = ? WHERE id = ?", (str(exc), f["id"]))
+            raise ScrapeError(str(exc)) from exc
+        with connect() as db:
+            db.execute("UPDATE show_files SET extracted = ?, extracted_at = ?, error = NULL WHERE id = ?",
+                       (_json.dumps(rows), now(), f["id"]))
+    return [_row(r["name"], r.get("booth") or "", booth_sqft=round(r["sqm"] * 10.7639) if r.get("sqm") else None,
+                 booth_dims=f"{r['sqm']:g} m²" if r.get("sqm") else "", hall=r.get("hall") or "") for r in rows]
+
+
 SCRAPERS = {
+    "pdf": scrape_pdf,
     "mapyourshow": scrape_mapyourshow,
     "a2z": scrape_a2z,
     "eshow": scrape_eshow,

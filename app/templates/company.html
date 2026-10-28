@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('companies_page') }}">Companies</a></p>
+<div class="titlerow">
+  <div>
+    <h1>{{ name }}</h1>
+    <p class="lede" style="margin-bottom:14px">
+      {% if company and company.industry %}{{ company.industry }}{% endif %}
+      {% if company and company.location %} · {{ company.location }}{% endif %}
+      {% if company and company.domain %} · <a href="https://{{ company.domain }}" target="_blank" rel="noopener">{{ company.domain }}</a>{% endif %}
+      {% if company and company.linkedin_url %} · <a href="{{ company.linkedin_url }}" target="_blank" rel="noopener">LinkedIn ↗</a>{% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    {% if request.args.get('opp') %}
+    <form method="post" action="{{ url_for('opportunity_action', oid=request.args.get('opp'), action='start') }}">{{ csrf_field }}<button {% if not am_ok %}disabled{% endif %}>Start outreach</button></form>
+    <form method="post" action="{{ url_for('opportunity_action', oid=request.args.get('opp'), action='dismiss') }}">{{ csrf_field }}<button class="ghost">Not for us</button></form>
+    {% endif %}
+    <form method="post" action="{{ url_for('company_web_research', key=key) }}">{{ csrf_field }}
+      <button class="ghost" {% if not ai_ok %}disabled title="Add your Anthropic API key first"{% endif %}>{{ 'Refresh' if research else 'Run' }} deep research</button></form>
+  </div>
+</div>
+
+<section class="stats">
+  <div class="stat"><b>{{ acct.show_count }}</b><span>upcoming show{{ 's' if acct.show_count != 1 }}</span></div>
+  <div class="stat"><b>{% if acct.biggest %}{{ '{:,.0f}'.format(acct.biggest.sqm) }} m²{% else %}–{% endif %}</b><span>biggest stand</span></div>
+  <div class="stat hl"><b>{{ acct.annual_value|money or '–' }}</b><span>est. stand spend, next 12 months</span></div>
+  <div class="stat"><b>{{ acct.annual_gp|money or '–' }}</b><span>est. gross profit for us</span></div>
+  <div class="stat"><b>{{ company.employees|thousands if company and company.employees else '–' }}</b><span>employees{% if company and company.growing %} · {{ company.growing }}{% endif %}</span></div>
+  <div class="stat"><b>{% if company and company.revenue_usd %}${{ '{:,.0f}'.format(company.revenue_usd / 1000000) }}m{% elif company and company.revenue %}{{ company.revenue }}{% else %}–{% endif %}</b><span>revenue</span></div>
+</section>
+
+<div class="split">
+  <div>
+    <section class="card flush">
+      <div class="cardhead"><h2>Where they exhibit</h2></div>
+      {% if acct.stands %}
+      <table>
+        <thead><tr><th>Show</th><th>Date</th><th class="num">Stand</th><th class="num">Est. value</th><th class="num">Est. GP</th></tr></thead>
+        <tbody>
+        {% for s in acct.stands|sort(attribute='date', reverse=True) %}
+          <tr class="{{ 'dim' if not s.upcoming or s.removed }}">
+            <td class="name">{% if s.show_id %}<a href="{{ url_for('show_page', show_id=s.show_id) }}">{{ s.show }}</a>{% else %}{{ s.show }}{% endif %}
+              {% if s.priority %}<span class="tag navy">In-house</span>{% endif %}{% if s.source == 'web' %}<span class="tag">From web</span>{% endif %}
+              <small>{{ s.location or '' }}{% if s.booth %} · booth {{ s.booth }}{% endif %}{% if s.removed %} · dropped out{% endif %}</small></td>
+            <td class="nowrap">{{ s.date|nicedate }}</td>
+            <td class="num nowrap">{% if s.sqm %}{{ '{:,.0f}'.format(s.sqm) }} m²{% else %}<span class="faint">unknown</span>{% endif %}</td>
+            <td class="num nowrap">{{ s.value|moneyrange }}</td>
+            <td class="num nowrap">{{ s.gp|money }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<p class="muted" style="padding:16px 24px;margin:0">No stands on record yet. Deep research looks for the shows they do.</p>{% endif %}
+    </section>
+
+    {% if research %}
+    <section class="card">
+      <h2>Deep research</h2>
+      <p class="sub">From a web search on {{ company.web_researched_at|nicedate }}. Check sources before quoting.</p>
+      {% if research.verdict %}<p><b>Verdict:</b> {{ research.verdict }}</p>{% endif %}
+      <table class="compact">
+        {% for label, k in [('Revenue', 'revenue'), ('Revenue trend', 'revenue_trend'), ('Headcount', 'headcount'), ('Headcount trend', 'headcount_trend')] %}
+          {% if research[k] %}<tr><td class="muted nowrap">{{ label }}</td><td>{{ research[k] }}</td></tr>{% endif %}
+        {% endfor %}
+      </table>
+      {% if research.recent_news %}
+      <h3 style="margin-top:14px">Recent news</h3>
+      <ul style="margin:0;padding-left:20px">{% for n in research.recent_news %}<li>{{ n.what }}{% if n.when %} <span class="muted">({{ n.when }})</span>{% endif %}{% if n.source %} <a href="{{ n.source }}" target="_blank" rel="noopener">source ↗</a>{% endif %}</li>{% endfor %}</ul>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if leads %}
+    <section class="card flush">
+      <div class="cardhead"><h2>Outreach</h2></div>
+      <table>
+        <thead><tr><th>Contact</th><th>Via</th><th>Status</th><th>Owner</th></tr></thead>
+        <tbody>
+        {% for l in leads %}
+          <tr><td class="name">{{ l.contact_name or l.email }}<small>{{ l.title or '' }}</small></td>
+            <td>{{ l.show_name or l.industry_name or '' }}</td>
+            <td><span class="pill {{ 'ok' if l.status in ('sent', 'replied') else 'run' if l.status in ('review', 'approved') else 'plain' }}">{{ {'review': 'To approve', 'approved': 'Scheduled', 'sent': 'In sequence', 'replied': 'Replied'}.get(l.status, l.status|capitalize) }}</span>
+              {% if l.reply_snippet %}<small>“{{ l.reply_snippet[:120] }}”</small>{% endif %}</td>
+            <td class="nowrap">{{ l.owner_name or '' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+  </div>
+
+  <aside>
+    <section class="card">
+      <h2>Profile</h2>
+      {% if company %}
+      <table class="compact">
+        {% if company.overview %}<tr><td colspan="2" class="small">{{ company.overview[:400] }}{% if company.overview|length > 400 %}…{% endif %}</td></tr>{% endif %}
+        {% if company.size %}<tr><td class="muted">Size</td><td>{{ company.size }}</td></tr>{% endif %}
+        {% if company.founded_year %}<tr><td class="muted">Founded</td><td>{{ company.founded_year }}</td></tr>{% endif %}
+        {% if company.funding_stage or company.total_funding %}<tr><td class="muted">Funding</td><td>{{ (company.funding_stage or '')|replace('_', ' ')|capitalize }}{% if company.funding_date %} · {{ company.funding_date|nicedate }}{% endif %}{% if company.total_funding %}<br><span class="small">Total ${{ '{:,.0f}'.format(company.total_funding|float / 1000000) }}m</span>{% endif %}</td></tr>{% endif %}
+        {% if company.open_roles is not none %}<tr><td class="muted">Open roles</td><td>{{ company.open_roles }}{% if roles %}<br><span class="small">Marketing/events: {{ roles|join(', ') }}</span>{% endif %}</td></tr>{% endif %}
+        {% if industries %}<tr><td class="muted">Campaigns</td><td>{% for i in industries %}<a href="{{ url_for('industry_page', iid=i.id) }}">{{ i.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>{% endif %}
+      </table>
+      {% else %}<p class="muted" style="margin:0">Not researched yet. It's researched automatically when one of its shows or industries is being prospected.</p>{% endif %}
+    </section>
+    {% if contacts %}
+    <section class="card">
+      <h2>People</h2>
+      <ul class="activity">{% for c in contacts %}<li><span><b style="font-weight:500">{{ c.name }}</b><br><span class="small">{{ c.title or '' }}{% if c.email %} · {{ c.email }}{% endif %}{% if c.email_status %} ({{ c.email_status }}){% endif %}</span></span></li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

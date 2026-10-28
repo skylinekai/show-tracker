@@ -66,14 +66,14 @@
     <input type="text" readonly value="{{ webhook_url }}" onclick="this.select()">
   </section>
 
-  <section class="card">
+  {% if conf.email_alerts %}<section class="card">
     <h2>Daily briefing</h2>
-    <p class="sub">Sent each morning to the address in Alerts &amp; daily briefing.</p>
+    <p class="sub">Sent each morning to anyone who has switched it on under My details.</p>
     <div class="actions">
       <a class="btn ghost small" href="{{ url_for('briefing_preview') }}" target="_blank">Preview</a>
       <form method="post" action="{{ url_for('test_briefing') }}">{{ csrf_field }}<button class="ghost small">Send me one now</button></form>
     </div>
-  </section>
+  </section>{% endif %}
 </aside>
 </div>
 {% endblock %}

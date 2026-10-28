@@ -25,15 +25,27 @@ FIELDS: dict[str, tuple] = {
                        "Optional. The AI matches its style."),
 
     # --- Who to target ---
-    "target_titles": ("Head of Marketing\nMarketing Director\nEvents Manager\nEvent Marketing Manager\n"
-                      "Trade Show Manager\nExhibitions Manager\nField Marketing Manager\nBrand Manager\n"
-                      "Marketing Manager\nCMO", "textarea", "Job titles to contact",
+    "target_titles": ("Marketing Director\nHead of Marketing\nEvents Manager\nHead of Events\nEvent Marketing Manager\n"
+                      "Trade Show Manager\nExhibitions Manager\nBrand Manager\nHead of Brand\nMarketing Manager\n"
+                      "Field Marketing Manager\nMarketing Communications Manager\nCMO", "textarea", "Job titles to contact",
                       "One per line, best first."),
     "target_seniorities": ("C-Suite\nVP\nHead\nDirector\nManager", "textarea", "Seniority levels", "One per line."),
-    "contacts_per_company": (2, "int", "Contacts per company", ""),
-    "min_booth_sqft": (200, "int", "Smallest booth worth chasing (sq ft)",
-                       "Shell-scheme sized booths below this are skipped. Only used when the size is known."),
-    "ideal_booth_sqft": (400, "int", "Ideal booth size from (sq ft)", "Booths this size and up score highest."),
+    "contacts_per_company": (3, "int", "Contacts per company", "2–3 gives more chances of a reply."),
+    "priority_locations": ("London\nBirmingham\nExCeL\nOlympia\nNEC\nBusiness Design Centre\nQEII Centre\n"
+                           "Tobacco Dock\nICC Birmingham", "textarea", "Priority locations",
+                           "Your most profitable work. Shows here are researched first and score higher. One per line."),
+    "rate_low": (800, "int", "In-house build rate from (£ per m²)", ""),
+    "rate_high": (1000, "int", "In-house build rate to (£ per m²)", ""),
+    "rate_outsourced": (1500, "int", "Outsourced build rate (£ per m²)", "e.g. North America."),
+    "outsourced_regions": ("USA\nUnited States\nCanada\nNorth America\nLas Vegas\nOrlando\nChicago\nNew York\n"
+                           "Atlanta\nBoston\nSan Diego\nSan Francisco\nLos Angeles\nAnaheim\nHouston\nDallas\n"
+                           "Miami\nPhiladelphia\nWashington DC\nNashville\nNew Orleans\nDenver\nPhoenix\nSeattle\n"
+                           "Toronto\nVancouver\nMontreal", "textarea", "Places you outsource (not in-house)",
+                           "Shows in these places use the outsourced rate and gross profit. One per line."),
+    "min_project_value": (30000, "int", "Smallest project worth chasing (£)",
+                          "Judged on the company's biggest stand at any show, not just this one."),
+    "gp_inhouse_pct": (60, "int", "Gross profit on in-house work (%)", ""),
+    "gp_elsewhere_pct": (40, "int", "Gross profit on outsourced work (%)", "Used for the places you outsource."),
     "min_employees": (20, "int", "Smallest company (employees)", ""),
     "exclude_industries": ("Event Services\nEvents Services", "textarea", "Industries to skip",
                            "One per line, e.g. other stand builders."),
@@ -41,7 +53,9 @@ FIELDS: dict[str, tuple] = {
                          "display stand\ntrade show display\nevent fabrication", "textarea",
                          "Skip companies whose name contains",
                          "One per line. Keeps competitors out."),
-    "min_score": (55, "int", "Minimum score to prepare outreach (0–100)", ""),
+    "min_score": (55, "int", "Minimum score to prepare outreach: shows (0–100)", ""),
+    "min_score_industry": (45, "int", "Minimum score to prepare outreach: industry campaigns (0–100)",
+                           "Lower, because companies found by industry often have no known stand size yet."),
 
     # --- Timing ---
     "window_start_days": (270, "int", "Start contacting this many days before the show", ""),
@@ -53,26 +67,39 @@ FIELDS: dict[str, tuple] = {
     "accept_risky_emails": (False, "bool", "Also send to 'risky' emails (catch-all domains)", ""),
     "daily_research_limit": (60, "int", "Companies researched per day",
                              "Each one uses Amplemarket credits. Raise it once you've seen the quality."),
+    "daily_opportunity_limit": (30, "int", "Opportunities researched per day",
+                                "Runs in the background so the Opportunities list always has contacts ready. Uses credits."),
+    "daily_web_research_limit": (15, "int", "Deep web research per day (best accounts)",
+                                 "Claude searches the web for their other shows, growth and news. A few pence each."),
 
     # --- Alerts & briefing ---
-    "big_booth_alert_sqft": (1000, "int", "Alert me when a new exhibitor's booth is at least (sq ft)", ""),
-    "briefing_hour": (7, "int", "Daily briefing time (hour, UK time)", ""),
-    "briefing_to": ("", "text", "Send the daily briefing to", "Email address(es), comma separated."),
+    "email_alerts": (False, "bool", "Send alert and briefing emails",
+                     "Off: big stands, replies and new exhibitors only show in the app. Needs the SMTP settings in Render when on."),
+    "big_stand_alert_sqm": (100, "int", "Alert me when a new exhibitor's stand is at least (m²)", ""),
+    "briefing_time": ("07:30", "text", "Morning briefing time (UK time)",
+                      "For anyone who's switched the briefing on under My details, e.g. 07:30."),
+    "briefing_to": ("", "text", "Also send the team briefing to",
+                    "Optional extra addresses, comma separated. Each salesperson gets their own briefing anyway "
+                    "(they can switch it off under My details)."),
 
     # --- Show discovery ---
     "discovery_topics": ("", "textarea", "Industries / show types to look for",
                          "One per line, e.g. medtech, construction, food & drink, defence."),
-    "discovery_regions": ("UK\nEurope\nUSA", "textarea", "Regions", "One per line."),
+    "discovery_regions": ("London\nBirmingham\nRest of UK\nEurope\nUSA\nMiddle East", "textarea", "Regions",
+                          "One per line, most important first."),
     "discovery_enabled": (True, "bool", "Look for new shows every week", ""),
 }
 
 SECTIONS = [
     ("About you", ["company_name", "sender_name", "pitch", "proof_points", "tone", "example_opener"]),
-    ("Who to target", ["target_titles", "target_seniorities", "contacts_per_company", "min_booth_sqft",
-                       "ideal_booth_sqft", "min_employees", "exclude_industries", "exclude_keywords", "min_score"]),
+    ("Project value", ["rate_low", "rate_high", "gp_inhouse_pct", "rate_outsourced", "gp_elsewhere_pct",
+                       "min_project_value", "priority_locations", "outsourced_regions"]),
+    ("Who to target", ["target_titles", "target_seniorities", "contacts_per_company", "min_employees",
+                       "exclude_industries", "exclude_keywords", "min_score", "min_score_industry"]),
     ("Timing", ["window_start_days", "window_end_days"]),
-    ("Amplemarket", ["default_sequence_id", "accept_risky_emails", "daily_research_limit"]),
-    ("Alerts & daily briefing", ["big_booth_alert_sqft", "briefing_hour", "briefing_to"]),
+    ("Amplemarket", ["default_sequence_id", "accept_risky_emails", "daily_research_limit", "daily_opportunity_limit",
+                     "daily_web_research_limit"]),
+    ("Alerts & morning briefing", ["email_alerts", "big_stand_alert_sqm", "briefing_time", "briefing_to"]),
     ("Finding new shows", ["discovery_enabled", "discovery_topics", "discovery_regions"]),
 ]
 

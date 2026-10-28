@@ -22,12 +22,13 @@
   <div class="wrap">
     {% set ep = request.endpoint %}
     <nav class="tabs">
-      <a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep in ('dashboard', 'show_page') }}">Shows</a>
-      <a href="{{ url_for('new_feed') }}" class="{{ 'on' if ep == 'new_feed' }}">New exhibitors</a>
+      <a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep in ('dashboard', 'show_page', 'new_feed') }}">Shows</a>
+      <a href="{{ url_for('industries_page') }}" class="{{ 'on' if ep in ('industries_page', 'industry_page') }}">Industries</a>
+      <a href="{{ url_for('opportunities_page') }}" class="{{ 'on' if ep == 'opportunities_page' }}">Opportunities</a>
+      <a href="{{ url_for('companies_page') }}" class="{{ 'on' if ep in ('companies_page', 'company_page') }}">Companies</a>
       <a href="{{ url_for('outreach') }}" class="{{ 'on' if ep == 'outreach' }}">Outreach{% if review_count %} <span class="badge hot">{{ review_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('discover') }}" class="{{ 'on' if ep == 'discover' }}">Find shows</a>
-      <a href="{{ url_for('settings_page') }}" class="{{ 'on' if ep == 'settings_page' }}">Settings</a>
-      {% if user.is_admin %}<a href="{{ url_for('users_page') }}" class="{{ 'on' if ep == 'users_page' }}">Users</a>{% endif %}
+      {% if user.is_admin %}<a href="{{ url_for('settings_page') }}" class="{{ 'on' if ep == 'settings_page' }}">Settings</a>
+      <a href="{{ url_for('users_page') }}" class="{{ 'on' if ep == 'users_page' }}">Users</a>{% endif %}
       <a href="{{ url_for('me') }}" class="{{ 'on' if ep == 'me' }}">My details</a>
     </nav>
     <main>
