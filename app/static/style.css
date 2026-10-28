@@ -1,11 +1,11 @@
-/* Skyline Whitespace: matches the Proposal Builder look */
+/* Skyline Whitespace brand: navy #24215C, grey #F8F9FB, Europa */
 :root {
-  --navy: #1a1a40;
-  --navy-80: #3b3b5c;
-  --ink: #1a1a40;
-  --muted: #6b6b85;
+  --navy: #24215C;
+  --navy-80: #36338a;
+  --ink: #24215C;
+  --muted: #6a6987;
   --faint: #9a9ab0;
-  --bg: #f7f8fa;
+  --bg: #F8F9FB;
   --card: #ffffff;
   --line: #d7d7e2;
   --line-soft: #e8e8ef;
@@ -19,7 +19,7 @@
   --red-bg: #fbeaec;
   --blue: #2c55b8;
   --blue-bg: #e9effc;
-  --font: "Jost", "Futura PT", Futura, "Century Gothic", "Helvetica Neue", Arial, sans-serif;
+  --font: "europa", "Europa", "Jost", "Futura PT", Futura, "Century Gothic", "Helvetica Neue", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
@@ -88,11 +88,11 @@ button.link:hover { color: var(--navy); background: none; }
 
 label { display: block; font-size: 15px; font-weight: 500; color: var(--navy); }
 label .hint { font-weight: 400; color: var(--muted); font-size: 13.5px; }
-input[type=text], input[type=email], input[type=password], input[type=url], input[type=date], input[type=number], input:not([type]), select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=url], input[type=date], input[type=number], input[type=tel], input:not([type]), select, textarea {
   width: 100%; margin-top: 6px; background: var(--field); border: 1px solid var(--line); color: var(--ink);
   font: 400 15px var(--font); padding: 10px 12px; border-radius: 0; }
 textarea { min-height: 84px; resize: vertical; line-height: 1.45; }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(26, 26, 64, .1); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--navy); box-shadow: 0 0 0 3px rgba(36, 33, 92, .12); }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 22px; }
 .grid .full { grid-column: 1 / -1; }
 .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 22px; }
@@ -193,12 +193,12 @@ table.compact td, table.compact th { padding: 8px 12px; font-size: 14px; }
 .person .copy .saved { color: var(--green); display: none; }
 .person .copy .readonly { white-space: pre-wrap; }
 .person .reply { background: var(--green-bg); padding: 8px 12px; font-size: 14px; margin-top: 8px; }
-.sticky-actions { position: sticky; bottom: 0; background: rgba(247, 248, 250, .96); border-top: 1px solid var(--line); padding: 12px 0; margin-top: 8px; display: flex; gap: 10px; align-items: center; z-index: 3; }
+.sticky-actions { position: sticky; bottom: 0; background: rgba(248, 249, 251, .96); border-top: 1px solid var(--line); padding: 12px 0; margin-top: 8px; display: flex; gap: 10px; align-items: center; z-index: 3; }
 .flashes { margin-bottom: 4px; }
 
 /* ---------- login ---------- */
 .login-page { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 9vh 16px 40px; }
-.login-card { width: 100%; max-width: 380px; background: #fff; border: 1px solid var(--line); box-shadow: 0 20px 40px -24px rgba(26, 26, 64, .25); padding: 44px 34px 36px; }
+.login-card { width: 100%; max-width: 380px; background: #fff; border: 1px solid var(--line); box-shadow: 0 20px 40px -24px rgba(36, 33, 92, .25); padding: 44px 34px 36px; }
 .login-card .logo { display: flex; justify-content: center; }
 .login-card .logo img { height: 50px; }
 .login-card .intro { text-align: center; color: var(--muted); margin: 14px 0 28px; font-size: 16px; }
@@ -226,3 +226,22 @@ footer.version { position: fixed; right: 12px; bottom: 8px; font-size: 12px; col
   .chips form.search { margin-left: 0; width: 100%; }
   footer.version { display: none; }
 }
+
+/* ---------- forms & users (matches Proposal Builder) ---------- */
+.req { color: #c0263a; }
+.formrow { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+.check.inline { display: inline-flex; align-items: center; gap: 8px; }
+.check.inline input { margin: 0; }
+button.textbtn { background: none; border: 0; padding: 8px 10px; color: var(--navy); font-weight: 400; }
+button.textbtn.bad { color: #b42335; }
+button.textbtn:hover { background: none; text-decoration: underline; }
+table.users th { background: #eef0f5; text-transform: uppercase; letter-spacing: .06em; font-size: 12.5px; padding: 14px 16px; }
+table.users td { padding: 14px 16px; vertical-align: middle; }
+table.users .uname { font-size: 16px; display: block; }
+table.users td.who small { font-size: 13.5px; }
+table.users td.actions-cell { width: 1%; white-space: nowrap; }
+table.users .rowactions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; flex-wrap: nowrap; }
+table.users .rowactions form { margin: 0; }
+table.users tr.editrow td { background: #fbfbfd; padding: 18px 16px 20px; }
+table.users tbody tr:hover td { background: transparent; }
+table.users tr.editrow:hover td { background: #fbfbfd; }

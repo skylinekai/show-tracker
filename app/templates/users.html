@@ -1,39 +1,92 @@
 {% extends "base.html" %}
 {% block title %}Users{% endblock %}
 {% block content %}
-<h1>Users</h1>
-<p class="lede">Everyone who can sign in to Show Tracker.</p>
-<div class="split">
-  <section class="card flush">
-    <table>
-      <thead><tr><th>User</th><th>Last signed in</th><th></th></tr></thead>
-      <tbody>
-      {% for u in users %}
-        <tr>
-          <td class="name">{{ u.name or u.email }}{% if u.is_admin %}<span class="tag navy">Admin</span>{% endif %}<small>{{ u.email }}</small></td>
-          <td class="muted nowrap">{{ u.last_login_at|ago }}</td>
-          <td class="num">
-            <details style="display:inline-block;text-align:left"><summary class="btn ghost small">Reset password</summary>
-              <form method="post" action="{{ url_for('users_password', uid=u.id) }}" style="margin-top:8px;display:flex;gap:8px">{{ csrf_field }}
-                <input type="password" name="password" placeholder="New password" minlength="8" required style="margin:0"><button class="small">Set</button></form>
-            </details>
-            {% if u.id != user.id %}<form method="post" action="{{ url_for('users_delete', uid=u.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ u.email }}?')">{{ csrf_field }}<button class="danger small">Remove</button></form>{% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </section>
-  <section class="card">
-    <h2>Add a user</h2>
-    <form method="post" class="grid" style="margin-top:12px">
-      {{ csrf_field }}
-      <label class="full">Name <input name="name"></label>
-      <label class="full">Email <input type="email" name="email" required></label>
-      <label class="full">Password <input type="password" name="password" minlength="8" required><div class="field-help">At least 8 characters. They can change it under My details.</div></label>
-      <label class="check full"><input type="checkbox" name="is_admin" value="1"><span>Admin <span class="hint">· can add and remove users</span></span></label>
-      <div class="full"><button type="submit">Add user</button></div>
-    </form>
-  </section>
-</div>
+<section class="card">
+  <h2>Add a salesperson</h2>
+  <p class="sub">They sign in with this email and password, and see the same shows and outreach as you.</p>
+  <form method="post" autocomplete="off">
+    {{ csrf_field }}
+    <div class="grid3">
+      <label>Name <span class="req">*</span><input name="name" value="{{ form.get('name', '') }}" required></label>
+      <label>Job title <span class="req">*</span><input name="job_title" value="{{ form.get('job_title', '') }}" required></label>
+      <label>Contact number <span class="req">*</span><input name="phone" type="tel" value="{{ form.get('phone', '') }}" required></label>
+      <label>Email <input name="email" type="email" value="{{ form.get('email', '') }}" placeholder="name@skylinewhitespace.com" required></label>
+      <label>Password <span class="hint">(at least {{ min_pw }} characters)</span><input name="password" id="newpw" type="text" minlength="{{ min_pw }}" required autocomplete="new-password"></label>
+    </div>
+    <div class="formrow">
+      <button type="button" class="ghost" id="genpw">Generate password</button>
+      <label class="check inline"><input type="checkbox" name="is_admin" value="1" {% if form.get('is_admin') %}checked{% endif %}><span>Can manage users and settings</span></label>
+      {% if email_ok %}<label class="check inline"><input type="checkbox" name="send_email" value="1" checked><span>Email them their sign-in</span></label>{% endif %}
+      <button type="submit">Add user</button>
+    </div>
+    {% if not email_ok %}<p class="small" style="margin:12px 0 0">Emails aren't set up yet, so you'll need to send each person their password yourself. See the README for the email settings.</p>{% endif %}
+  </form>
+</section>
+
+<section class="card flush">
+  <table class="users">
+    <thead><tr><th colspan="2">Name</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td class="who">
+          <span class="uname">{{ u.name or u.email }}{% if u.is_admin %}<span class="tag navy">Admin</span>{% endif %}</span>
+          <small>{% if u.job_title %}{{ u.job_title }} · {% endif %}{{ u.email }}</small>
+          <small>{{ u.last_login_at|lastlogin }}</small>
+        </td>
+        <td class="actions-cell"><div class="rowactions">
+          <a class="btn ghost" href="{{ url_for('users_page', edit=u.id) }}#u{{ u.id }}">Edit</a>
+          <a class="btn ghost" href="{{ url_for('users_page', reset=u.id) }}#u{{ u.id }}">Reset password</a>
+          {% if u.id != user.id %}<form method="post" action="{{ url_for('users_delete', uid=u.id) }}" onsubmit="return confirm('Remove {{ u.name or u.email }}? They will no longer be able to sign in.')">{{ csrf_field }}<button class="textbtn bad">Remove</button></form>{% endif %}
+        </div></td>
+      </tr>
+      {% if editing == u.id %}
+      <tr id="u{{ u.id }}" class="editrow"><td colspan="2">
+        <form method="post" action="{{ url_for('users_edit', uid=u.id) }}">
+          {{ csrf_field }}
+          <div class="grid3">
+            <label>Name <span class="req">*</span><input name="name" value="{{ u.name or '' }}" required></label>
+            <label>Job title <span class="req">*</span><input name="job_title" value="{{ u.job_title or '' }}" required></label>
+            <label>Contact number <span class="req">*</span><input name="phone" type="tel" value="{{ u.phone or '' }}" required></label>
+            <label>Email <input name="email" type="email" value="{{ u.email }}" required></label>
+          </div>
+          <div class="formrow">
+            {% if u.id != user.id %}<label class="check inline"><input type="checkbox" name="is_admin" value="1" {% if u.is_admin %}checked{% endif %}><span>Can manage users and settings</span></label>{% endif %}
+            <button type="submit">Save</button><a class="btn ghost" href="{{ url_for('users_page') }}">Cancel</a>
+          </div>
+        </form>
+      </td></tr>
+      {% endif %}
+      {% if reset == u.id %}
+      <tr id="u{{ u.id }}" class="editrow"><td colspan="2">
+        <form method="post" action="{{ url_for('users_password', uid=u.id) }}">
+          {{ csrf_field }}
+          <div class="formrow" style="margin-top:0">
+            <label style="flex:1;max-width:340px">New password for {{ u.name or u.email }} <span class="hint">(at least {{ min_pw }} characters)</span>
+              <input name="password" class="resetpw" type="text" minlength="{{ min_pw }}" required autocomplete="new-password"></label>
+            <button type="button" class="ghost genreset">Generate password</button>
+            <button type="submit">Set password</button><a class="btn ghost" href="{{ url_for('users_page') }}">Cancel</a>
+          </div>
+        </form>
+      </td></tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  function makePassword() {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', out = '', buf = new Uint32Array(12);
+    crypto.getRandomValues(buf);
+    for (var i = 0; i < buf.length; i++) out += chars[buf[i] % chars.length];
+    return out;
+  }
+  var gen = document.getElementById('genpw');
+  if (gen) gen.addEventListener('click', function () { document.getElementById('newpw').value = makePassword(); });
+  document.querySelectorAll('.genreset').forEach(function (b) {
+    b.addEventListener('click', function () { b.closest('form').querySelector('.resetpw').value = makePassword(); });
+  });
+</script>
 {% endblock %}

@@ -266,7 +266,22 @@ def test_login_flow(monkeypatch):
     assert client.post("/shows", data={"url": "https://x.org/exh_list.cfm"}).status_code == 400
     token = _csrf(client)
     assert client.post("/users", data={"_csrf": token, "email": "sam@skylinewhitespace.com", "password": "abcdefgh1",
-                                       "name": "Sam"}).status_code == 302
+                                       "name": "Sam Lee", "job_title": "Account Manager", "phone": "+44 1473 000000"}).status_code == 302
+    # missing job title is refused
+    client.post("/users", data={"_csrf": token, "email": "x@skylinewhitespace.com", "password": "abcdefgh1", "name": "X"})
+    page = client.get("/users").get_data(as_text=True)
+    assert "Sam Lee" in page and "Account Manager" in page and "Never signed in" in page and "x@skyline" not in page
+    sam = [u for u in auth.list_users() if u["email"].startswith("sam")][0]
+    client.post(f"/users/{sam['id']}/edit", data={"_csrf": token, "name": "Sam Lee", "job_title": "Sales Lead",
+                                                  "phone": "1", "email": "sam@skylinewhitespace.com"})
+    assert auth.get_user(sam["id"])["job_title"] == "Sales Lead"
+    client.post(f"/users/{sam['id']}/password", data={"_csrf": token, "password": "short"})
+    client.post("/me", data={"_csrf": token, "form": "details", "name": "Kai", "job_title": "Sales & Marketing Director",
+                             "phone": "+44"})
+    assert "Sales &amp; Marketing Director" in client.get("/me").get_data(as_text=True)
+    client.post("/me", data={"_csrf": token, "form": "password", "current": "correct horse", "new": "newpass99",
+                             "again": "newpass99"})
+    assert auth.authenticate("kai@skylinewhitespace.com", "newpass99")
     assert len(auth.list_users()) == 2
     client.post("/logout", data={"_csrf": token})
     assert client.get("/").status_code == 302

@@ -98,7 +98,7 @@ def hot_reply(lead: dict, label: str, snippet: str) -> None:
     alert_email(f"Reply from {who}",
                 f"<p><b>{_esc(who)}</b> replied about <b>{_esc(lead.get('show_name') or '')}</b>"
                 f"{' and was marked <b>' + _esc(label.replace('_', ' ')) + '</b>' if label else ''}.</p>"
-                f"<blockquote style='border-left:3px solid #1a1a40;margin:0;padding:4px 12px;color:#444'>"
+                f"<blockquote style='border-left:3px solid #24215C;margin:0;padding:4px 12px;color:#444'>"
                 f"{_esc(snippet[:600])}</blockquote><p>Reply from Amplemarket to keep the thread together.</p>"
                 + _link("/outreach?view=replied", "See all replies"))
 
@@ -152,12 +152,12 @@ def alert_email(subject: str, body_html: str) -> None:
 
 def wrap_email(title: str, body_html: str) -> str:
     return (
-        "<div style=\"font-family:'Jost',Futura,'Helvetica Neue',Arial,sans-serif;background:#f7f8fa;padding:24px\">"
+        "<div style=\"font-family:europa,'Europa',Futura,'Helvetica Neue',Arial,sans-serif;background:#F8F9FB;padding:24px\">"
         "<div style='max-width:640px;margin:0 auto;background:#fff;border:1px solid #d7d7e2;padding:28px 32px'>"
         "<div style='font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#6b6b85;margin-bottom:6px'>"
         "Skyline Whitespace · Show Tracker</div>"
-        f"<h1 style='font-size:22px;font-weight:500;color:#1a1a40;margin:0 0 18px'>{_esc(title)}</h1>"
-        f"<div style='color:#1a1a40;font-size:15px;line-height:1.55'>{body_html}</div></div></div>"
+        f"<h1 style='font-size:22px;font-weight:500;color:#24215C;margin:0 0 18px'>{_esc(title)}</h1>"
+        f"<div style='color:#24215C;font-size:15px;line-height:1.55'>{body_html}</div></div></div>"
     )
 
 
@@ -170,7 +170,7 @@ def _esc(s) -> str:
 def _link(path: str, label: str) -> str:
     if not APP_BASE_URL:
         return ""
-    return (f"<p style='margin-top:20px'><a href='{APP_BASE_URL}{path}' style='background:#1a1a40;color:#fff;"
+    return (f"<p style='margin-top:20px'><a href='{APP_BASE_URL}{path}' style='background:#24215C;color:#fff;"
             f"padding:10px 20px;border-radius:999px;text-decoration:none;display:inline-block'>{_esc(label)}</a></p>")
 
 

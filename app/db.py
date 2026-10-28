@@ -171,6 +171,8 @@ MIGRATIONS = [
     ("exhibitors", "score_notes", "TEXT"),
     ("exhibitors", "stage", "TEXT"),
     ("exhibitors", "alerted_at", "TEXT"),
+    ("users", "job_title", "TEXT"),
+    ("users", "phone", "TEXT"),
 ]
 
 

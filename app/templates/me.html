@@ -1,15 +1,30 @@
 {% extends "base.html" %}
 {% block title %}My details{% endblock %}
 {% block content %}
-<h1>My details</h1>
-<p class="lede">Signed in as {{ user.email }}.</p>
-<section class="card" style="max-width:520px">
+<section class="card">
+  <h2>Your details</h2>
+  <p class="sub">You sign in as {{ user.email }}.</p>
+  <form method="post">
+    {{ csrf_field }}<input type="hidden" name="form" value="details">
+    <div class="grid3">
+      <label>Name <span class="req">*</span><input name="name" value="{{ user.name or '' }}" required></label>
+      <label>Job title <span class="req">*</span><input name="job_title" value="{{ user.job_title or '' }}" required></label>
+      <label>Contact number <span class="req">*</span><input name="phone" type="tel" value="{{ user.phone or '' }}" required></label>
+    </div>
+    <div class="formrow"><button type="submit">Save details</button></div>
+  </form>
+</section>
+
+<section class="card">
   <h2>Change password</h2>
-  <form method="post" class="grid" style="margin-top:12px">
-    {{ csrf_field }}
-    <label class="full">Current password <input type="password" name="current" autocomplete="current-password" required></label>
-    <label class="full">New password <input type="password" name="new" minlength="8" autocomplete="new-password" required></label>
-    <div class="full"><button type="submit">Change password</button></div>
+  <form method="post">
+    {{ csrf_field }}<input type="hidden" name="form" value="password">
+    <div class="grid3" style="margin-top:12px">
+      <label>Current password <input name="current" type="password" autocomplete="current-password" required></label>
+      <label>New password <span class="hint">(at least {{ min_pw }} characters)</span><input name="new" type="password" minlength="{{ min_pw }}" autocomplete="new-password" required></label>
+      <label>New password again <input name="again" type="password" minlength="{{ min_pw }}" autocomplete="new-password" required></label>
+    </div>
+    <div class="formrow"><button type="submit">Change password</button></div>
   </form>
 </section>
 {% endblock %}

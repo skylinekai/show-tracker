@@ -23,6 +23,7 @@ Your business development robot for trade shows. It:
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Sending the daily briefing and alerts | For the briefing |
 | `SLACK_WEBHOOK_URL` | Alerts in Slack | Optional |
 | `CLAY_WEBHOOK_URL` | Also send new exhibitors to Clay, as before | Optional |
+| `ADOBE_FONTS_KIT` | Your Adobe Fonts kit ID (e.g. `abc1234`) for Europa. Add your app's domain to the kit in Adobe Fonts. Without it the app uses Jost, a close free match. | For the brand font |
 | `CHECK_INTERVAL_HOURS` | How often shows are re-checked (default 24) | Optional |
 
 If you deployed the first version with `APP_PASSWORD`, it still works: the first person to sign in with any email and that password becomes the admin. After that, sign in with your email and that password.

@@ -23,7 +23,7 @@ from .scrapers import PLATFORM_LABELS, detect_platform
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 NEW_WINDOW_DAYS = 7
-APP_VERSION = "2026-10-28-b"
+APP_VERSION = "2026-10-28-c"
 
 app = Flask(__name__)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
@@ -57,7 +57,8 @@ def inject():
             review = db.one("SELECT COUNT(*) AS n FROM leads WHERE status = 'review'")["n"]
     field = Markup(f'<input type="hidden" name="_csrf" value="{session["csrf"]}">')
     return {"csrf": session["csrf"], "csrf_field": field, "user": getattr(g, "user", None),
-            "review_count": review, "version": APP_VERSION}
+            "review_count": review, "version": APP_VERSION,
+            "font_kit": os.environ.get("ADOBE_FONTS_KIT", "").strip()}
 
 
 def admin_required(fn):
@@ -573,18 +574,61 @@ def briefing_preview():
 
 
 # ---------------------------------------------------------------- users
+@app.template_filter("lastlogin")
+def lastlogin(ts: str | None) -> str:
+    if not ts:
+        return "Never signed in"
+    try:
+        local = datetime.fromisoformat(ts).astimezone(jobs.UK)
+    except ValueError:
+        return ts
+    return "Last login " + local.strftime("%-d %b %Y, %H:%M")
+
+
 @app.route("/users", methods=["GET", "POST"])
 @admin_required
 def users_page():
     if request.method == "POST":
+        f = request.form
         try:
-            auth.create_user(request.form["email"], request.form["password"], request.form.get("name", ""),
-                             request.form.get("is_admin") == "1")
-            flash(f"Added {request.form['email']}. Send them the password you set; they can change it under My details.", "ok")
-        except (ValueError, KeyError) as exc:
+            if not f.get("name", "").strip() or not f.get("job_title", "").strip() or not f.get("phone", "").strip():
+                raise ValueError("Name, job title and contact number are all needed.")
+            uid = auth.create_user(f.get("email", ""), f.get("password", ""), f.get("name", ""),
+                                   f.get("is_admin") == "1", f.get("job_title", ""), f.get("phone", ""))
+            sent = False
+            if f.get("send_email") == "1" and notify.email_configured():
+                sent = notify.send_email([f["email"]], "Your Show Tracker sign-in", notify.wrap_email(
+                    "Welcome to Show Tracker",
+                    f"<p>Hi {notify._esc(f['name'].split()[0])},</p><p>{notify._esc(g.user['name'] or g.user['email'])} "
+                    f"has given you access to Show Tracker.</p><p>Email: <b>{notify._esc(f['email'])}</b><br>"
+                    f"Password: <b>{notify._esc(f['password'])}</b></p><p>You can change your password under My details.</p>"
+                    + notify._link("/login", "Sign in")))
+            log_activity("user", f"{g.user['email']} added {f['email']}", f"user:{uid}")
+            flash(f"Added {f['name']}." + (" They've been emailed their sign-in details." if sent else
+                                           " Send them their email and password yourself."), "ok")
+        except ValueError as exc:
             flash(str(exc), "bad")
+            return render_template("users.html", users=auth.list_users(), form=f, email_ok=notify.email_configured(),
+                                   min_pw=auth.MIN_PASSWORD, editing=None)
         return redirect(url_for("users_page"))
-    return render_template("users.html", users=auth.list_users())
+    return render_template("users.html", users=auth.list_users(), form={}, email_ok=notify.email_configured(),
+                           min_pw=auth.MIN_PASSWORD, editing=request.args.get("edit", type=int),
+                           reset=request.args.get("reset", type=int))
+
+
+@app.post("/users/<int:uid>/edit")
+@admin_required
+def users_edit(uid: int):
+    f = request.form
+    try:
+        auth.update_user(uid, name=f.get("name", ""), job_title=f.get("job_title", ""), phone=f.get("phone", ""),
+                         email=f.get("email", ""),
+                         is_admin=None if uid == g.user["id"] else f.get("is_admin") == "1")
+        flash("Saved.", "ok")
+    except ValueError as exc:
+        flash(str(exc), "bad")
+        return redirect(url_for("users_page", edit=uid))
+    return redirect(url_for("users_page"))
 
 
 @app.post("/users/<int:uid>/delete")
@@ -601,27 +645,38 @@ def users_delete(uid: int):
 @app.post("/users/<int:uid>/password")
 @admin_required
 def users_password(uid: int):
-    pw = request.form.get("password", "")
-    if len(pw) < 8:
-        flash("Use at least 8 characters.", "bad")
-    else:
-        auth.set_password(uid, pw)
-        flash("Password updated.", "ok")
+    try:
+        auth.set_password(uid, request.form.get("password", ""))
+        flash("Password updated. Let them know the new one.", "ok")
+    except ValueError as exc:
+        flash(str(exc), "bad")
+        return redirect(url_for("users_page", reset=uid))
     return redirect(url_for("users_page"))
 
 
 @app.route("/me", methods=["GET", "POST"])
 def me():
     if request.method == "POST":
-        if not auth.authenticate(g.user["email"], request.form.get("current", "")):
-            flash("Your current password isn't right.", "bad")
-        elif len(request.form.get("new", "")) < 8:
-            flash("Use at least 8 characters for the new password.", "bad")
+        f = request.form
+        if f.get("form") == "details":
+            if not f.get("name", "").strip() or not f.get("job_title", "").strip() or not f.get("phone", "").strip():
+                flash("Name, job title and contact number are all needed.", "bad")
+            else:
+                auth.update_user(g.user["id"], name=f["name"], job_title=f["job_title"], phone=f["phone"])
+                flash("Your details are saved.", "ok")
         else:
-            auth.set_password(g.user["id"], request.form["new"])
-            flash("Password changed.", "ok")
+            if not auth.check_password(g.user["id"], f.get("current", "")):
+                flash("Your current password isn't right.", "bad")
+            elif f.get("new", "") != f.get("again", ""):
+                flash("The two new passwords don't match.", "bad")
+            else:
+                try:
+                    auth.set_password(g.user["id"], f.get("new", ""))
+                    flash("Password changed.", "ok")
+                except ValueError as exc:
+                    flash(str(exc), "bad")
         return redirect(url_for("me"))
-    return render_template("me.html")
+    return render_template("me.html", min_pw=auth.MIN_PASSWORD)
 
 
 # ---------------------------------------------------------------- export & webhooks
