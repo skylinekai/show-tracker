@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Outreach{% endblock %}
+{% block content %}
+<div class="titlerow">
+  <div>
+    <h1>Outreach</h1>
+    <p class="lede">Researched decision-makers at well-fitting exhibitors, each with a personalised subject and opening line. Edit anything, then approve. Approved contacts go into your Amplemarket sequence when the show's outreach window opens.</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="{{ url_for('outreach_run') }}">{{ csrf_field }}<input type="hidden" name="n" value="10">
+      <button class="ghost" {% if not am_ok %}disabled title="Connect Amplemarket first"{% endif %}>Research 10 more now</button></form>
+  </div>
+</div>
+
+{% if not am_ok or not ai_ok or not conf.pitch or not conf.default_sequence_id %}
+<div class="note warn"><p><b>Setup to finish</b></p><ul>
+  {% if not am_ok %}<li>Add your Amplemarket API key on Render (AMPLEMARKET_API_KEY).</li>{% endif %}
+  {% if not ai_ok %}<li>Add your Anthropic API key on Render (ANTHROPIC_API_KEY) so opening lines get written.</li>{% endif %}
+  {% if not conf.pitch %}<li>Fill in <a href="{{ url_for('settings_page') }}">What you offer</a>; it's what every opening line is built from.</li>{% endif %}
+  {% if not conf.default_sequence_id %}<li>Choose a default <a href="{{ url_for('settings_page') }}">Amplemarket sequence</a>.</li>{% endif %}
+</ul></div>
+{% endif %}
+
+<div class="chips">
+  {% for key, (label, _) in views.items() %}
+    <a class="chip {{ 'on' if view == key }}" href="{{ url_for('outreach', view=key, show=show_filter) }}">{{ label }} <span>{{ counts[key] }}</span></a>
+  {% endfor %}
+  <span class="grow"></span>
+  {% if shows|length > 1 or show_filter %}
+  <form method="get" style="min-width:220px"><input type="hidden" name="view" value="{{ view }}">
+    <select name="show" onchange="this.form.submit()" style="margin:0;border-radius:999px;padding:7px 14px">
+      <option value="">All shows</option>
+      {% for s in shows %}<option value="{{ s.id }}" {% if show_filter == s.id %}selected{% endif %}>{{ s.name }} ({{ s.n }})</option>{% endfor %}
+    </select></form>
+  {% endif %}
+</div>
+
+{% if view == 'review' %}<p class="small" style="margin:-4px 0 14px">Researched today: {{ done_today }} of {{ conf.daily_research_limit }} companies (daily limit, set in Settings).</p>{% endif %}
+{% if view == 'scheduled' and counts.scheduled %}<form method="post" action="{{ url_for('outreach_send') }}" style="margin:-4px 0 14px">{{ csrf_field }}<button class="ghost small">Send everything that's due now</button> <span class="small">This also runs automatically every 15 minutes.</span></form>{% endif %}
+
+{% if groups %}
+<form method="post" action="{{ url_for('outreach_decide') }}" id="decide">
+  {{ csrf_field }}
+  {% for gp in groups %}
+  <section class="company">
+    <div class="company-head">
+      {% if view == 'review' or view == 'scheduled' %}<label class="check"><input type="checkbox" class="co" checked></label>{% endif %}
+      <div>
+        <h3>{{ gp.company }}</h3>
+        <div class="meta">
+          <a href="{{ url_for('show_page', show_id=gp.show_id) }}">{{ gp.show }}</a>{% if gp.show_date %} · {{ gp.show_date|nicedate }}{% endif %}
+          {% if gp.booth %} · booth {{ gp.booth }}{% endif %}{% if gp.booth_sqft %} · {{ gp.booth_sqft|thousands }} sq ft{% if gp.booth_dims %} ({{ gp.booth_dims }}){% endif %}{% endif %}
+          {% if gp.employees %} · {{ gp.employees|thousands }} staff{% endif %}{% if gp.industry %} · {{ gp.industry }}{% endif %}
+          {% if gp.domain %} · <a href="https://{{ gp.domain }}" target="_blank" rel="noopener">{{ gp.domain }}</a>{% endif %}
+        </div>
+      </div>
+      {% if gp.score is not none %}<div class="score"><b>{{ gp.score }}</b><span>score</span></div>{% endif %}
+    </div>
+    {% if gp.score_notes %}<div class="why">Why: {{ gp.score_notes }}</div>{% endif %}
+    {% for l in gp.leads %}
+    <div class="person">
+      <div>{% if view in ('review', 'scheduled') %}<input type="checkbox" name="lead" value="{{ l.id }}" class="pick" checked>{% endif %}</div>
+      <div class="who">
+        <b>{{ l.contact_name or l.email }}</b>
+        <span>{{ l.title or '' }}</span>
+        <span>{{ l.email }}</span>
+        {% if l.linkedin_url and l.linkedin_url.startswith('http') %}<span><a href="{{ l.linkedin_url }}" target="_blank" rel="noopener">LinkedIn ↗</a></span>{% endif %}
+      </div>
+      <div class="copy">
+        {% if view in ('review', 'scheduled') %}
+          <input type="text" form="edit-{{ l.id }}" name="subject" value="{{ l.subject or '' }}" placeholder="Subject line" data-lead="{{ l.id }}">
+          <textarea form="edit-{{ l.id }}" name="opener" placeholder="Opening line" data-lead="{{ l.id }}">{{ l.opener or '' }}</textarea>
+          <div class="row">
+            <span class="saved" id="saved-{{ l.id }}">Saved</span>
+            {% if view == 'scheduled' %}<span>Goes out {{ 'today' if not l.send_after or l.send_after <= today else l.send_after|nicedate }}</span>{% endif %}
+            {% if l.error %}<span style="color:var(--red)">{{ l.error }}</span>{% endif %}
+            <span class="grow" style="flex:1"></span>
+            <button class="link" form="rw-{{ l.id }}" type="submit">Rewrite</button>
+          </div>
+        {% else %}
+          {% if l.subject %}<b>{{ l.subject }}</b>{% endif %}
+          <div class="readonly">{{ l.opener or '' }}</div>
+          <div class="row">
+            {% if l.sent_at %}<span>Sent {{ l.sent_at|ago }}</span>{% endif %}
+            {% if l.status in ('rejected', 'skipped', 'expired') %}<span class="pill plain">{{ l.status|capitalize }}</span>{% endif %}
+            {% if l.error %}<span>{{ l.error }}</span>{% endif %}
+          </div>
+          {% if l.reply_snippet %}<div class="reply">{% if l.reply_label %}<b>{{ l.reply_label.replace('_', ' ')|capitalize }}</b> · {% endif %}{{ l.replied_at|ago }}<br>{{ l.reply_snippet }}</div>{% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  {% if view in ('review', 'scheduled') %}
+  <div class="sticky-actions">
+    {% if view == 'review' %}<button name="action" value="approve">Approve selected</button>{% endif %}
+    <button name="action" value="reject" class="ghost">{{ 'Reject selected' if view == 'review' else 'Cancel selected' }}</button>
+    <span class="muted small" id="selcount"></span>
+  </div>
+  {% endif %}
+</form>
+{% for gp in groups %}{% for l in gp.leads %}
+<form id="edit-{{ l.id }}" method="post" action="{{ url_for('lead_edit', lead_id=l.id) }}">{{ csrf_field }}</form>
+<form id="rw-{{ l.id }}" method="post" action="{{ url_for('lead_rewrite', lead_id=l.id) }}">{{ csrf_field }}</form>
+{% endfor %}{% endfor %}
+{% else %}
+<p class="empty">
+  {% if view == 'review' %}Nothing waiting. Switch on <b>Prospecting</b> on a show and the best-fit exhibitors are researched each day (up to your daily limit), then appear here.
+  {% elif view == 'scheduled' %}Nothing scheduled. Approved contacts wait here until the show's outreach window opens.
+  {% elif view == 'replied' %}No replies yet. Add the webhook link from Settings to Amplemarket so replies show up here.
+  {% else %}Nothing here.{% endif %}
+</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  // tick/untick a whole company
+  document.querySelectorAll('.company').forEach(function (co) {
+    var all = co.querySelector('input.co');
+    if (!all) return;
+    all.addEventListener('change', function () {
+      co.querySelectorAll('input.pick').forEach(function (c) { c.checked = all.checked; });
+      count();
+    });
+  });
+  function count() {
+    var n = document.querySelectorAll('input.pick:checked').length, el = document.getElementById('selcount');
+    if (el) el.textContent = n + ' selected';
+  }
+  document.querySelectorAll('input.pick').forEach(function (c) { c.addEventListener('change', count); });
+  count();
+  // save edits as you go
+  document.querySelectorAll('[data-lead]').forEach(function (el) {
+    el.addEventListener('change', function () {
+      var form = document.getElementById('edit-' + el.dataset.lead), fd = new FormData(form);
+      document.querySelectorAll('[data-lead="' + el.dataset.lead + '"]').forEach(function (f) { fd.set(f.name, f.value); });
+      fetch(form.action, {method: 'POST', body: fd, headers: {'X-Requested-With': 'fetch'}}).then(function (r) {
+        if (r.ok) { var s = document.getElementById('saved-' + el.dataset.lead); s.style.display = 'inline'; setTimeout(function () { s.style.display = 'none'; }, 1500); }
+      });
+    });
+  });
+</script>
+{% endblock %}

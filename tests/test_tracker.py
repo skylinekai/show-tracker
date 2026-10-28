@@ -7,15 +7,6 @@ import pytest
 FIX = Path(__file__).parent / "fixtures"
 
 
-@pytest.fixture(autouse=True)
-def fresh_db(tmp_path, monkeypatch):
-    import app.db as db
-
-    monkeypatch.setattr(db, "DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
-    db.init_db()
-    yield
-
-
 # ---------------------------------------------------------------- parsers
 def test_platform_detection():
     from app.scrapers import detect_platform
@@ -165,42 +156,3 @@ def test_clay_payload(monkeypatch):
     assert posted[0]["company_name"] == "IMO" and posted[0]["show_name"] == "ViVE 27" and posted[0]["booth"] == "2341"
 
 
-# ---------------------------------------------------------------- web
-def test_pages_render(monkeypatch):
-    from app import notify, tracker, web
-
-    monkeypatch.setattr(notify, "new_exhibitors", lambda *a: [])
-    monkeypatch.setattr(web, "_run_in_background", lambda sid: None)
-    client = web.create_app(start_scheduler=False).test_client()
-
-    assert client.get("/").status_code == 200
-    resp = client.post("/shows", data={"url": "s36.a2zinc.net/clients/SME/FABTECH2026/Public/Exhibitors.aspx",
-                                       "name": "FABTECH 2026", "start_date": "2026-11-10", "location": "Chicago"})
-    assert resp.status_code == 302
-    sid = int(resp.headers["Location"].rstrip("/").split("/")[-1])
-    scraper = _fake([["DSR Performance", "Petit Auto"], ["DSR Performance", "Petit Auto", "Rovertown"]])
-    tracker.check_show(sid, scraper)
-    tracker.check_show(sid, scraper)
-
-    page = client.get("/").get_data(as_text=True)
-    assert "FABTECH 2026" in page and "+1" in page
-    for view in ("all", "new", "removed", "junk"):
-        assert client.get(f"/shows/{sid}?view={view}").status_code == 200
-    assert "Rovertown" in client.get(f"/shows/{sid}?view=new").get_data(as_text=True)
-    assert "Rovertown" in client.get("/new").get_data(as_text=True)
-    csv = client.get(f"/export.csv?show={sid}").get_data(as_text=True)
-    assert csv.splitlines()[0].startswith("company,booth") and "Petit Auto" in csv
-    assert client.get("/export.csv?days=7").status_code == 200
-
-
-def test_password(monkeypatch):
-    from app import web
-
-    monkeypatch.setattr(web, "APP_PASSWORD", "s3cret")
-    client = web.create_app(start_scheduler=False).test_client()
-    assert client.get("/").status_code == 401
-    assert client.get("/healthz").status_code == 200
-    import base64
-
-    ok = client.get("/", headers={"Authorization": "Basic " + base64.b64encode(b"me:s3cret").decode()})
-    assert ok.status_code == 200

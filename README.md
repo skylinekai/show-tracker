@@ -1,102 +1,86 @@
-# Show Tracker
+# Show Tracker · Skyline Whitespace
 
-Watches trade-show exhibitor lists and tells you who's new. Add a show once; the app re-checks
-it every day, records every exhibitor it has ever seen, and flags the ones that weren't there
-last time. New exhibitors can be sent straight to your Clay table, so your existing Clay →
-Amplemarket flow keeps working.
+Your business development robot for trade shows. It:
 
-This is stage 1 of the business-development robot. PDF floorplan upload, enrichment and
-sequencing come next and plug into the same database.
+1. **Tracks shows.** Watches each show's exhibitor list daily (Map Your Show, A2Z, eShow or any exhibitor table), flags new exhibitors and drop-outs, and pulls exact booth sizes from Map Your Show floorplans.
+2. **Finds the right companies.** On shows with **Prospecting** switched on, it scores every exhibitor on booth size, company size, industry and timing, and skips poor fits and competitors before spending any credits.
+3. **Finds the right people.** For the best fits, it uses Amplemarket to find decision-makers (events, marketing, trade show managers), reveal their emails and check they're deliverable.
+4. **Writes the emails.** Claude writes a personalised subject and opening line for each person, mentioning the show, their booth and their company, using only the facts you give it.
+5. **Waits for you.** Everything lands in **Outreach** for you to edit and approve in a click. You can set a show to send without approval.
+6. **Sends at the right time.** Approved contacts go into your Amplemarket sequence when the show enters your outreach window (by default 270 to 45 days before the show). Amplemarket handles the sending, follow-ups and opt-outs.
+7. **Stays on top of things.** A daily briefing email, instant alerts for replies and big booths, automatic tracking of next year's edition, and a weekly web search for new shows in your industries.
 
-## What it does
+## Environment variables (Render → your service → Environment)
 
-- **Tracks shows on the big platforms**
-  - **Map Your Show** (`<show>.mapyourshow.com/8_0/...`). The full exhibitor list comes from one request, no 25-company limit.
-  - **A2Z** (`…a2zinc.net/…/Public/Exhibitors.aspx`)
-  - **eShow** (`…/exhibitor_list.cfm`)
-  - **Any page with an exhibitor table**
-- **Spots new exhibitors.** The first check is the baseline. After that, anyone who appears goes into the **New exhibitors** feed and, if configured, to Clay and Slack.
-- **Spots drop-outs.** Exhibitors who disappear are marked "dropped out", not deleted. If a check suddenly returns far fewer names than last time, the app assumes the site misbehaved and doesn't mark anyone removed.
-- **Filters out non-companies.** Rows like "Innovation Theater", "Ask an Expert Presentations" and "Guest Nation Booth" are kept aside under "Not companies". They're never sent to Clay, so you don't pay to enrich them.
-- **Finds next year's show automatically (Map Your Show).** When `nab27.mapyourshow.com` is tracked, the app also checks `nab28…`. As soon as that directory goes live, it starts tracking it and tells you.
-- **Shows repeat exhibitors.** The New exhibitors feed shows how many other tracked shows each company is at.
-- **Exports CSV** per show (all, new, dropped) or for the whole feed.
+| Variable | What it's for | Needed? |
+|---|---|---|
+| `DATABASE_URL` | Where data is stored, e.g. `sqlite:////var/data/showtracker.db` with a disk mounted at `/var/data` | Yes |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | The first sign-in account (you). Add teammates later under **Users**. | Yes, for first sign-in |
+| `SECRET_KEY` | Keeps people signed in across restarts. Any long random string. | Recommended |
+| `AMPLEMARKET_API_KEY` | Finding people, checking emails, adding contacts to sequences | For outreach |
+| `ANTHROPIC_API_KEY` | Writing opening lines and searching for new shows | For outreach |
+| `APP_BASE_URL` | Your app's address, e.g. `https://show-tracker.onrender.com`, used for links in emails and Slack | Recommended |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Sending the daily briefing and alerts | For the briefing |
+| `SLACK_WEBHOOK_URL` | Alerts in Slack | Optional |
+| `CLAY_WEBHOOK_URL` | Also send new exhibitors to Clay, as before | Optional |
+| `CHECK_INTERVAL_HOURS` | How often shows are re-checked (default 24) | Optional |
+
+If you deployed the first version with `APP_PASSWORD`, it still works: the first person to sign in with any email and that password becomes the admin. After that, sign in with your email and that password.
+
+## Setting up outreach
+
+1. **Amplemarket API key:** in Amplemarket, open Settings and find the API section. Create a key, then add it as `AMPLEMARKET_API_KEY`.
+2. **Anthropic API key:** sign up at console.anthropic.com, add billing, create a key and add it as `ANTHROPIC_API_KEY`.
+3. **Create the sequence in Amplemarket.** Use these fields in the first email:
+   - `{{opening_line}}`: the personalised 1–2 sentences. Start the email with this.
+   - `{{subject_line}}`: the personalised subject.
+   - `{{first_name}}`, `{{company_name}}`, `{{show_name}}`, `{{show_date}}`, `{{show_location}}`, `{{booth_number}}`, `{{booth_size}}`, `{{title}}`
+
+   Activate or pause the sequence. Amplemarket won't accept contacts into a draft sequence.
+4. **In the app's Settings:**
+   - Fill in **What you offer** and **Proof points**. The AI never claims anything beyond these.
+   - Pick the default sequence and check the targeting and timing.
+   - Add your email to **Send the daily briefing to**.
+5. **Replies:** copy the webhook link from **Settings → Replies from Amplemarket** into Amplemarket's reply webhook (JSON data integration). Replies then show up in **Outreach → Replied** and trigger alerts.
+6. **Switch on prospecting** on a show (the switch at the top of its page). Researched contacts appear in **Outreach** over the following hours, up to your daily limit.
+
+## Email for the briefing (SMTP)
+
+The app can send email through most mail providers:
+
+| Provider | `SMTP_HOST` | `SMTP_PORT` | Notes |
+|---|---|---|---|
+| Microsoft 365 | `smtp.office365.com` | 587 | Your IT admin may need to enable "Authenticated SMTP" for the mailbox |
+| Google Workspace | `smtp.gmail.com` | 587 | Use an app password |
+| Postmark, Resend, SendGrid | the provider's SMTP host | | Usually the simplest option |
+
+Set `SMTP_USER` and `SMTP_PASSWORD` to the mailbox login, and `SMTP_FROM` to the address the emails should come from.
+
+## Costs to keep an eye on
+
+- **Amplemarket credits:** each researched company uses credits for email reveals and validation. **Companies researched per day** in Settings caps this (default 60). A company researched for one show is reused for the next for 120 days, at no extra cost.
+- **Claude:** writing openers costs a fraction of a penny per contact. The weekly show search runs up to 10 web searches.
 
 ## Run it on your computer
 
 ```bash
 pip install -r requirements.txt
-python wsgi.py            # open http://localhost:8000
+ADMIN_EMAIL=you@example.com ADMIN_PASSWORD=choose-one python wsgi.py   # http://localhost:8000
 ```
-
-Data is stored in `showtracker.db` (SQLite) in the project folder.
 
 Tests: `pip install pytest && python -m pytest -q`
-
-## Deploy to Render
-
-1. Push this folder to a new GitHub repo.
-2. In Render: **New + → Blueprint**, then pick the repo. `render.yaml` creates:
-   - `show-tracker`: the web app, which also runs the daily checks
-   - `show-tracker-db`: a Postgres database
-3. Render asks for these values:
-   - `APP_PASSWORD`: anyone opening the app is asked for it (any username works).
-   - `CLAY_WEBHOOK_URL`: the same webhook URL your n8n "Post to Clay" step uses. Leave it blank to skip Clay.
-   - `SLACK_WEBHOOK_URL`: optional, for a message whenever new exhibitors appear.
-4. When the deploy finishes, open the URL and paste in your first show's exhibitor list link.
-
-The web service needs a paid instance type so it stays awake, because the scheduler runs inside it. Free Render web services go to sleep and would stop checking.
-
-## Settings (environment variables)
-
-| Variable | What it does | Default |
-|---|---|---|
-| `DATABASE_URL` | Postgres connection string (set by the Blueprint) | local SQLite file |
-| `APP_PASSWORD` | Password for the app | none (open) |
-| `CHECK_INTERVAL_HOURS` | How often each show is re-checked | 24 |
-| `CLAY_WEBHOOK_URL` | Sends each new exhibitor to Clay, one row per company | off |
-| `WEBHOOK_URL` | Sends a batch of new exhibitors to any webhook (n8n, Make, Zapier) | off |
-| `SLACK_WEBHOOK_URL` | Slack message per show when new exhibitors appear | off |
-| `APP_BASE_URL` | Your app's URL, used for links in Slack messages | none |
-| `RUN_SCHEDULER` | Set to `0` to turn off automatic checks | 1 |
-
-### What gets sent to Clay
-
-Each new exhibitor is sent as one JSON row:
-
-```json
-{
-  "company_name": "Halcyon Robotics",
-  "booth": "1717",
-  "website": "",
-  "description": "",
-  "profile_url": "https://vive27.mapyourshow.com/8_0/exhibitor/exhibitor-details.cfm?exhid=1001",
-  "show_name": "ViVE 27",
-  "show_date": "2027-03-14",
-  "show_location": "Los Angeles",
-  "show_url": "https://vive27.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm",
-  "source": "showtracker"
-}
-```
-
-Only exhibitors found *after* a show's first check are sent. That way, adding a show with 600
-existing exhibitors doesn't flood Clay. To send the full list for a brand-new show, export
-the show's CSV and import it into Clay.
-
-## Finding the right link for a show
-
-- **Map Your Show:** open the show's exhibitor list. The link contains `/8_0/`; any page under that address works.
-- **A2Z:** the exhibitor list page ends in `/Public/Exhibitors.aspx`. A floor-plan link ending `/Public/eventmap.aspx` also works; the app switches to the list.
-- **eShow:** the page ends in `exhibitor_list.cfm`.
-- **Anything else:** a page that shows exhibitors in a table. Pages that load exhibitors with JavaScript (many custom show sites) won't work yet. The app says so rather than guessing.
 
 ## Project layout
 
 ```
-app/scrapers.py   platform detection and one scraper per platform
-app/tracker.py    checking a show, diffing against last time, scheduler, next-edition discovery
-app/notify.py     Clay / webhook / Slack
-app/web.py        the web pages and CSV export
-app/db.py         database (SQLite locally, Postgres on Render)
-tests/            tests, with saved sample pages for each platform
+app/scrapers.py     reading exhibitor lists (+ Map Your Show booth sizes)
+app/tracker.py      checking shows, new / dropped exhibitors, next-edition discovery
+app/prospecting.py  scoring, Amplemarket research, openers, approval, sending, replies
+app/amplemarket.py  Amplemarket API
+app/ai.py           Claude: opening lines and show search
+app/jobs.py         the 15-minute background loop, daily briefing, weekly show search
+app/notify.py       email, Slack, Clay
+app/settings.py     everything on the Settings page, with defaults
+app/auth.py         user accounts
+app/web.py          pages
 ```

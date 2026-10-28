@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Show Tracker · Skyline Whitespace</title>
+  <link rel="icon" href="{{ url_for('static', filename='logo.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ version }}">
+</head>
+<body>
+  <div class="login-page">
+    <form class="login-card" method="post">
+      <div class="logo"><img src="{{ url_for('static', filename='logo.png') }}" alt="Skyline Whitespace"></div>
+      <p class="intro">Sign in to Show Tracker.</p>
+      {% if error %}<p class="error">{{ error }}</p>{% endif %}
+      {% if needs_setup %}<p class="error">No accounts yet. Set ADMIN_EMAIL and ADMIN_PASSWORD on Render, then redeploy.</p>{% endif %}
+      <label>Email <input type="email" name="email" value="{{ email }}" autocomplete="username" required autofocus></label>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

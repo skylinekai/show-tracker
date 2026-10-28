@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Find shows{% endblock %}
+{% block content %}
+<div class="titlerow">
+  <div>
+    <h1>Find shows</h1>
+    <p class="lede">Once a week the app searches the web for upcoming shows in your industries and regions that you aren't tracking yet. Add the good ones with one click.</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="{{ url_for('discover_run') }}">{{ csrf_field }}<button {% if not ai_ok %}disabled title="Add your Anthropic API key first"{% endif %}>Search now</button></form>
+  </div>
+</div>
+
+<div class="note"><p>
+  Looking for: <b>{{ conf.discovery_topics.splitlines()|select|join(', ') or 'nothing yet' }}</b>
+  in <b>{{ conf.discovery_regions.splitlines()|select|join(', ') or 'any region' }}</b>.
+  {% if last %}Last searched {{ last|nicedate }}.{% endif %}
+  <a href="{{ url_for('settings_page') }}#finding-new-shows">Change</a>
+</p></div>
+
+{% if suggested %}
+{% for s in suggested %}
+<section class="card">
+  <div class="titlerow">
+    <div>
+      <h2>{{ s.name }}</h2>
+      <p class="sub" style="margin-bottom:8px">{{ s.start_date|nicedate or 'Date unknown' }}{% if s.location %} · {{ s.location }}{% endif %}{% if s.industry %} · {{ s.industry }}{% endif %}
+        {% if s.website %} · <a href="{{ s.website }}" target="_blank" rel="noopener">website ↗</a>{% endif %}</p>
+      {% if s.reason %}<p style="margin:0">{{ s.reason }}</p>{% endif %}
+    </div>
+    <form method="post" action="{{ url_for('discover_dismiss', did=s.id) }}">{{ csrf_field }}<button class="ghost small">Not for us</button></form>
+  </div>
+  <form method="post" action="{{ url_for('create_show') }}" class="grid" style="margin-top:16px">
+    {{ csrf_field }}<input type="hidden" name="discovered_id" value="{{ s.id }}">
+    <input type="hidden" name="name" value="{{ s.name }}"><input type="hidden" name="location" value="{{ s.location or '' }}">
+    <input type="hidden" name="start_date" value="{{ s.start_date or '' }}">
+    <label class="full">Exhibitor list link {% if not s.url %}<span class="hint">· not found automatically. Open the show's website, find the exhibitor list and paste its link</span>{% endif %}
+      <input name="url" value="{{ s.url or '' }}" required placeholder="https://…"></label>
+    <div class="full"><button type="submit">Track this show</button></div>
+  </form>
+</section>
+{% endfor %}
+{% else %}
+<p class="empty">{% if not ai_ok %}Add your Anthropic API key on Render (ANTHROPIC_API_KEY) to switch this on.{% elif not conf.discovery_topics %}Add the industries you want shows for in <a href="{{ url_for('settings_page') }}#finding-new-shows">Settings</a>, then press Search now.{% else %}No suggestions waiting. New ones arrive weekly, or press Search now.{% endif %}
+{% if dismissed %}<br><span class="small">{{ dismissed }} dismissed so far.</span>{% endif %}</p>
+{% endif %}
+{% endblock %}

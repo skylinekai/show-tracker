@@ -73,13 +73,16 @@ def _session() -> requests.Session:
     return s
 
 
-def _row(name, booth="", description="", website="", profile_url="") -> dict:
+def _row(name, booth="", description="", website="", profile_url="", booth_sqft=None, booth_dims="", hall="") -> dict:
     return {
         "name": clean(name)[:200],
         "booth": clean(booth)[:60],
         "description": clean(description)[:800],
         "website": clean(website)[:300],
         "profile_url": clean(profile_url)[:500],
+        "booth_sqft": int(booth_sqft) if booth_sqft else None,
+        "booth_dims": clean(booth_dims)[:40],
+        "hall": clean(hall)[:120],
     }
 
 
@@ -128,8 +131,101 @@ def parse_mys_json(data: dict, base: str) -> list[dict]:
         exhid = f.get("exhid_l") or hit.get("id") or ""
         profile = f"{base}/exhibitor/exhibitor-details.cfm?exhid={exhid}" if exhid else ""
         website = f.get("exhurl_t") or f.get("website_t") or ""
-        rows.append(_row(name, ", ".join(b for b in booths if b), f.get("exhdesc_t") or "", website, profile))
+        row = _row(name, ", ".join(b for b in booths if b), f.get("exhdesc_t") or "", website, profile)
+        row["_exhid"] = str(exhid)
+        rows.append(row)
     return rows
+
+
+def parse_mys_booths(data: dict, hall: str) -> list[dict]:
+    """One hall of the floorplan: [{exhid, booth, area, width_ft, depth_ft, hall}]."""
+    cols = data.get("COLUMNS") or [] if isinstance(data, dict) else []
+    out = []
+    for raw in (data.get("DATA") or []) if isinstance(data, dict) else []:
+        rec = dict(zip(cols, raw))
+        if rec.get("OBJECTTYPE") != "booth" or not rec.get("EXHID"):
+            continue
+        props = rec.get("FEATUREPROPERTIES") or {}
+        if isinstance(props, str):
+            try:
+                import json as _json
+                props = _json.loads(props)
+            except ValueError:
+                props = {}
+        props = props.get("properties") or {}
+        try:
+            area = float(props.get("area") or 0)
+        except (TypeError, ValueError):
+            area = 0.0
+        w, d = props.get("boothWidth"), props.get("boothHeight")  # inches
+        try:
+            w, d = (float(w), float(d)) if w and d else (None, None)
+        except (TypeError, ValueError):
+            w, d = None, None
+        if not area and w and d:
+            area = w * d / 144.0
+        out.append({"exhid": str(rec["EXHID"]), "booth": clean(rec.get("BOOTHDISPLAY") or rec.get("BOOTH") or ""),
+                    "area": round(area), "width_ft": round(w / 12) if w else None,
+                    "depth_ft": round(d / 12) if d else None, "hall": hall})
+    return out
+
+
+def join_mys_booths(rows: list[dict], booths: list[dict], hall_names: dict) -> None:
+    """Adds booth_sqft / booth_dims / hall to gallery rows, in place."""
+    by_exh: dict[str, list[dict]] = {}
+    for b in booths:
+        by_exh.setdefault(b["exhid"], []).append(b)
+    for r in rows:
+        mine = by_exh.get(r.get("_exhid", ""))
+        if not mine:
+            continue
+        total = sum(b["area"] for b in mine)
+        big = max(mine, key=lambda b: b["area"])
+        dims = f"{big['width_ft']}×{big['depth_ft']} ft" if big["width_ft"] and big["depth_ft"] else ""
+        if len(mine) > 1 and dims:
+            dims += f" (+{len(mine) - 1})"
+        r["booth_sqft"] = int(total) or None
+        r["booth_dims"] = dims
+        r["hall"] = ", ".join(sorted({hall_names.get(b["hall"], b["hall"]) for b in mine}))
+
+
+def _mys_booth_sizes(s: requests.Session, base: str, rows: list[dict]) -> None:
+    """Best effort: floorplan geometry gives exact booth sizes. Never fails the check."""
+    origin = base.rsplit("/", 1)[0]
+    xhr = {"X-Requested-With": "XMLHttpRequest", "Accept": "application/json, */*"}
+    try:
+        halls_json = s.get(f"{base}/ajax/remote-proxy.cfm", timeout=TIMEOUT,
+                           params={"action": "getsearchoptions", "function": "getBoothHalls"},
+                           headers={**xhr, "Referer": f"{base}/explore/exhibitor-gallery.cfm"}).json()
+        halls = {str(h.get("fieldvalue")): clean(h.get("fielddisplay") or h.get("fieldvalue"))
+                 for h in (halls_json.get("DATA") or []) if h.get("fieldvalue")}
+        fp_page = f"{base}/floorplan/"
+        showid, versions = urlparse(origin).netloc.split(".")[0].upper(), ["02"]
+        try:
+            page = s.get(fp_page, timeout=TIMEOUT).text
+            m = re.search(r'ShowID\s*=\s*"([^"]+)"', page)
+            showid = m.group(1) if m else showid
+            m = re.search(r"floorplan/(\d{2})/", page)
+            if m and m.group(1) != "02":
+                versions.append(m.group(1))
+        except requests.RequestException:
+            pass
+        for ver in versions:
+            booths = []
+            for hall in halls or {"": ""}:
+                try:
+                    data = s.get(f"{base}/floorplan/{ver}/_remote-proxy.cfm", timeout=TIMEOUT,
+                                 params={"showid": showid, "selectedbooth": "", "hallid": hall,
+                                         "action": "GetBoothByHall", "method": "GetBoothByHall", "regid": 0},
+                                 headers={**xhr, "Referer": fp_page}).json()
+                    booths += parse_mys_booths(data, hall)
+                except (requests.RequestException, ValueError):
+                    continue
+            if booths:
+                join_mys_booths(rows, booths, halls)
+                return
+    except (requests.RequestException, ValueError, AttributeError):
+        return
 
 
 def scrape_mapyourshow(url: str, session: requests.Session | None = None) -> list[dict]:
@@ -152,7 +248,10 @@ def scrape_mapyourshow(url: str, session: requests.Session | None = None) -> lis
         data = r.json()
     except ValueError:
         raise ScrapeError("Map Your Show returned a web page instead of data (directory closed or not yet live).")
-    return parse_mys_json(data, base)
+    rows = parse_mys_json(data, base)
+    if rows and session is None:
+        _mys_booth_sizes(s, base, rows)
+    return rows
 
 
 def mys_next_edition_url(url: str) -> str | None:
@@ -303,8 +402,10 @@ def scrape(url: str, platform: str | None = None) -> list[dict]:
         if k in merged:
             if r["booth"] and r["booth"] not in merged[k]["booth"]:
                 merged[k]["booth"] = ", ".join(b for b in (merged[k]["booth"], r["booth"]) if b)
-            for f in ("description", "website", "profile_url"):
-                merged[k][f] = merged[k][f] or r[f]
+            for f in ("description", "website", "profile_url", "booth_dims", "hall"):
+                merged[k][f] = merged[k].get(f) or r.get(f) or ""
+            if r.get("booth_sqft"):
+                merged[k]["booth_sqft"] = (merged[k].get("booth_sqft") or 0) + r["booth_sqft"]
         else:
-            merged[k] = dict(r)
+            merged[k] = {key: v for key, v in r.items() if not key.startswith("_")}
     return list(merged.values())

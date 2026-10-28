@@ -1,24 +1,52 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GB">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Show Tracker{% endblock %}</title>
-  {% block head %}{% endblock %}
+  <title>{% block title %}Show Tracker{% endblock %} · Skyline Whitespace</title>
+  <link rel="icon" href="{{ url_for('static', filename='logo.png') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ version }}">
+  {% block head %}{% endblock %}
 </head>
 <body>
-  <header class="top">
-    <a class="brand" href="{{ url_for('dashboard') }}"><span class="pulse"></span>SHOW_TRACKER</a>
-    <nav>
-      <a href="{{ url_for('dashboard') }}" class="{{ 'on' if request.endpoint in ('dashboard', 'show_page') }}">Shows</a>
-      <a href="{{ url_for('new_feed') }}" class="{{ 'on' if request.endpoint == 'new_feed' }}">New exhibitors</a>
-    </nav>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="logo" href="{{ url_for('dashboard') }}"><img src="{{ url_for('static', filename='logo.png') }}" alt="Skyline Whitespace"></a>
+      <a class="apptitle" href="{{ url_for('dashboard') }}">Show Tracker</a>
+      <div class="who">
+        <span class="email">{{ user.email }}</span>
+        <form method="post" action="{{ url_for('logout') }}">{{ csrf_field }}<button class="ghost">Sign out</button></form>
+      </div>
+    </div>
   </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
+  <div class="wrap">
+    {% set ep = request.endpoint %}
+    <nav class="tabs">
+      <a href="{{ url_for('dashboard') }}" class="{{ 'on' if ep in ('dashboard', 'show_page') }}">Shows</a>
+      <a href="{{ url_for('new_feed') }}" class="{{ 'on' if ep == 'new_feed' }}">New exhibitors</a>
+      <a href="{{ url_for('outreach') }}" class="{{ 'on' if ep == 'outreach' }}">Outreach{% if review_count %} <span class="badge hot">{{ review_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('discover') }}" class="{{ 'on' if ep == 'discover' }}">Find shows</a>
+      <a href="{{ url_for('settings_page') }}" class="{{ 'on' if ep == 'settings_page' }}">Settings</a>
+      {% if user.is_admin %}<a href="{{ url_for('users_page') }}" class="{{ 'on' if ep == 'users_page' }}">Users</a>{% endif %}
+      <a href="{{ url_for('me') }}" class="{{ 'on' if ep == 'me' }}">My details</a>
+    </nav>
+    <main>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}<div class="flashes">{% for cat, msg in messages %}<div class="note {{ cat }}"><p>{{ msg }}</p></div>{% endfor %}</div>{% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <footer class="version">Version {{ version }}</footer>
+  <script>
+    document.addEventListener('click', function (e) {
+      var tr = e.target.closest('tr[data-href]');
+      if (tr && !e.target.closest('a, button, input, form, label')) location.href = tr.dataset.href;
+    });
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

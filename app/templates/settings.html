@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="lede">How the app picks targets, writes emails and times outreach. Changes apply from the next run.</p>
+
+<div class="split">
+<form method="post">
+  {{ csrf_field }}
+  {% for title, keys in sections %}
+  <section class="card" id="{{ title|lower|replace(' ', '-')|replace('&', 'and') }}">
+    <h2>{{ title }}</h2>
+    {% if title == 'About you' %}<p class="sub">Every opening line is written from this. The AI never invents facts beyond what you put here.</p>{% endif %}
+    {% if title == 'Who to target' %}<p class="sub">Companies are scored out of 100 on booth size (40), company size (30), timing (20) and having a booth number (10).</p>{% endif %}
+    <div class="grid" style="margin-top:14px">
+    {% for key in keys %}
+      {% set default, kind, label, help = fields[key] %}
+      {% if kind == 'textarea' %}
+        <label class="full">{{ label }}<textarea name="{{ key }}" rows="{{ 5 if key in ('pitch', 'proof_points', 'target_titles') else 3 }}">{{ conf[key] }}</textarea>{% if help %}<div class="field-help">{{ help }}</div>{% endif %}</label>
+      {% elif kind == 'bool' %}
+        <label class="check full"><input type="checkbox" name="{{ key }}" value="1" {% if conf[key] %}checked{% endif %}><span>{{ label }}{% if help %}<span class="hint"> · {{ help }}</span>{% endif %}</span></label>
+      {% elif kind == 'sequence' %}
+        <label class="full">{{ label }}
+          {% if sequences %}
+          <select name="{{ key }}"><option value="">Choose a sequence…</option>
+            {% for s in sequences %}<option value="{{ s.id }}" {% if conf[key] == s.id %}selected{% endif %}>{{ s.name }}{% if s.status == 'paused' %} (paused){% endif %}</option>{% endfor %}
+          </select>
+          {% else %}<input name="{{ key }}" value="{{ conf[key] }}" placeholder="Sequence ID (connect Amplemarket to pick from a list)">{% endif %}
+          <div class="field-help">{{ help }} The sequence must exist and be active or paused in Amplemarket. Use the fields below in its emails.</div></label>
+      {% else %}
+        <label class="{{ 'full' if key in ('tone', 'briefing_to') else '' }}">{{ label }}
+          <input name="{{ key }}" type="{{ 'number' if kind == 'int' else 'text' }}" value="{{ conf[key] }}">{% if help %}<div class="field-help">{{ help }}</div>{% endif %}</label>
+      {% endif %}
+    {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+  <div class="sticky-actions"><button type="submit">Save settings</button></div>
+</form>
+
+<aside>
+  <section class="card">
+    <h2>Connections</h2>
+    <p class="sub">API keys live on Render (Environment tab), never in the app.</p>
+    <table class="compact">
+      {% for name, ok in status.items() %}
+      <tr><td>{{ name }}</td><td class="num"><span class="pill {{ 'ok' if ok else 'plain' }}">{{ 'Connected' if ok else 'Not set' }}</span></td></tr>
+      {% endfor %}
+    </table>
+    <form method="post" action="{{ url_for('refresh_sequences') }}" style="margin-top:12px">{{ csrf_field }}<button class="ghost small">Reload sequences from Amplemarket</button></form>
+  </section>
+
+  <section class="card">
+    <h2>Fields for your sequence</h2>
+    <p class="sub">Every contact arrives in Amplemarket with these. Use them in your sequence's first email:</p>
+    <table class="compact">
+      {% for f, d in [('opening_line', 'the personalised 1–2 sentences'), ('subject_line', 'personalised subject'), ('first_name', ''), ('company_name', ''), ('show_name', 'e.g. NAB Show 2027'), ('show_date', 'e.g. 18 April 2027'), ('show_location', ''), ('booth_number', ''), ('booth_size', 'e.g. 1,200 sq ft'), ('title', 'their job title')] %}
+      <tr><td><code>{{ '{{' }}{{ f }}{{ '}}' }}</code></td><td class="small">{{ d }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Replies from Amplemarket</h2>
+    <p class="sub">So replies show up here and trigger alerts, paste this link into Amplemarket's reply webhook (JSON data integration):</p>
+    <input type="text" readonly value="{{ webhook_url }}" onclick="this.select()">
+  </section>
+
+  <section class="card">
+    <h2>Daily briefing</h2>
+    <p class="sub">Sent each morning to the address in Alerts &amp; daily briefing.</p>
+    <div class="actions">
+      <a class="btn ghost small" href="{{ url_for('briefing_preview') }}" target="_blank">Preview</a>
+      <form method="post" action="{{ url_for('test_briefing') }}">{{ csrf_field }}<button class="ghost small">Send me one now</button></form>
+    </div>
+  </section>
+</aside>
+</div>
+{% endblock %}

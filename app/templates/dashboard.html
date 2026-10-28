@@ -1,56 +1,71 @@
 {% extends "base.html" %}
+{% block title %}Shows{% endblock %}
 {% block head %}{% if shows|selectattr('status', 'equalto', 'Checking')|list %}<meta http-equiv="refresh" content="6">{% endif %}{% endblock %}
 {% block content %}
-<p class="eyebrow">Tracking // Shows</p>
 <h1>Shows</h1>
-<p class="lede">Every show here is re-checked about every {{ interval|int }} hours. Exhibitors that weren't there last time land in <a href="{{ url_for('new_feed') }}">New exhibitors</a>.</p>
+<p class="lede">Every show is re-checked daily. New exhibitors are flagged, and on shows with prospecting switched on the best fits are researched and written up for you to approve.</p>
+
+{% if setup %}
+<div class="note warn"><p><b>Finish setting up</b> to switch on outreach:</p><ul>{% for s in setup %}<li>{{ s }}</li>{% endfor %}</ul></div>
+{% endif %}
 
 <section class="stats">
-  <div><b>{{ stats.shows }}</b><span>shows tracked</span></div>
-  <div><b>{{ "{:,}".format(stats.exhibitors) }}</b><span>exhibitors listed</span></div>
-  <div><b>{{ "{:,}".format(stats.companies) }}</b><span>unique companies</span></div>
-  <div class="hl"><b>{{ stats.new }}</b><span>new in last {{ window }} days</span></div>
-  {% if stats.problems %}<div class="warnbox"><b>{{ stats.problems }}</b><span>need a look</span></div>{% endif %}
+  <div class="stat"><b>{{ stats.shows }}</b><span>shows tracked</span></div>
+  <div class="stat"><b>{{ stats.exhibitors|thousands }}</b><span>exhibitors listed</span></div>
+  <div class="stat hl"><b>{{ stats.new }}</b><span>new in the last {{ window }} days</span></div>
+  <div class="stat"><b>{{ review_count }}</b><span><a href="{{ url_for('outreach') }}">waiting for approval</a></span></div>
+  <div class="stat"><b>{{ stats.sent }}</b><span>contacted (30 days)</span></div>
+  <div class="stat hl"><b>{{ stats.replied }}</b><span>replies (30 days)</span></div>
 </section>
 
-<details class="add" {% if not shows %}open{% endif %}>
-  <summary>+ Track a show</summary>
-  <form method="post" action="{{ url_for('create_show') }}" class="addform">
-    <label class="wide">Exhibitor list link
-      <input name="url" required placeholder="https://nab27.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm">
-      <small>Map Your Show, A2Z (…/Public/Exhibitors.aspx), eShow, or any page with an exhibitor table.</small>
-    </label>
-    <label>Show name <input name="name" placeholder="NAB Show 2027"></label>
+<details class="card add-show" {% if not shows %}open{% endif %}>
+  <summary><h2>Track a show</h2><span class="btn ghost small">+ Add</span></summary>
+  <form method="post" action="{{ url_for('create_show') }}" class="grid">
+    {{ csrf_field }}
+    <label class="full">Exhibitor list link <span class="hint">Map Your Show, A2Z (…/Public/Exhibitors.aspx), eShow, or any page with an exhibitor table</span>
+      <input name="url" required placeholder="https://nab27.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm"></label>
+    <label>Show name <input name="name" placeholder="e.g. NAB Show 2027"></label>
+    <label>Venue / location <input name="location" placeholder="e.g. Las Vegas"></label>
     <label>Show date <input name="start_date" type="date"></label>
-    <label>Location <input name="location" placeholder="Las Vegas"></label>
-    <button type="submit">Start tracking</button>
+    <div class="full"><button type="submit">Start tracking</button></div>
   </form>
 </details>
 
+{% if suggestions %}
+<div class="note ok"><p><b>{{ suggestions }} new show{{ 's' if suggestions != 1 }} found</b> matching your industries. <a href="{{ url_for('discover') }}">Review them</a></p></div>
+{% endif %}
+
 {% if shows %}
-<div class="tablewrap">
-<table>
-  <thead><tr>
-    <th>Show</th><th>Status</th><th>Date</th><th class="num">Days until</th>
-    <th class="num">Exhibitors</th><th class="num">New ({{ window }}d)</th><th>Source</th><th>Last checked</th>
-  </tr></thead>
-  <tbody>
-  {% for s in shows %}
-    <tr class="{{ 'dim' if (s.days_until is not none and s.days_until < 0) or not s.active }}" onclick="location.href='{{ url_for('show_page', show_id=s.id) }}'">
-      <td class="name"><a href="{{ url_for('show_page', show_id=s.id) }}">{{ s.name }}</a>{% if s.location %}<small>{{ s.location }}</small>{% endif %}</td>
-      <td><span class="pill {{ s.status_class }}">{{ s.status }}</span></td>
-      <td class="mono">{{ s.start_date|nicedate }}</td>
-      <td class="num mono">{% if s.days_until is not none %}{{ s.days_until if s.days_until >= 0 else 'past' }}{% endif %}</td>
-      <td class="num mono">{{ "{:,}".format(s.active_count) }}</td>
-      <td class="num mono">{% if s.new_count %}<span class="new">+{{ s.new_count }}</span>{% else %}–{% endif %}</td>
-      <td>{{ s.platform_label }}</td>
-      <td class="mono muted">{{ s.last_checked_at|ago }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
+<div class="card flush">
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Show</th><th>Status</th><th>Date</th><th class="num">Days</th><th class="num">Exhibitors</th><th class="num">New ({{ window }}d)</th><th class="num">Contacted</th><th>Last checked</th></tr></thead>
+    <tbody>
+    {% for s in shows %}
+      <tr class="{{ 'dim' if (s.days_until is not none and s.days_until < 0) or not s.active }}" data-href="{{ url_for('show_page', show_id=s.id) }}">
+        <td class="name"><a href="{{ url_for('show_page', show_id=s.id) }}">{{ s.name }}</a>{% if s.prospecting %}<span class="tag navy">Prospecting</span>{% endif %}
+          <small>{{ s.location or '' }}{% if s.location %} · {% endif %}{{ s.platform_label }}</small></td>
+        <td><span class="pill {{ s.status_class }}">{{ s.status }}</span></td>
+        <td class="nowrap">{{ s.start_date|nicedate }}</td>
+        <td class="num">{% if s.days_until is not none %}{{ s.days_until if s.days_until >= 0 else 'past' }}{% endif %}</td>
+        <td class="num">{{ s.active_count|thousands }}</td>
+        <td class="num">{% if s.new_count %}<b style="color:var(--green);font-weight:500">+{{ s.new_count }}</b>{% else %}<span class="faint">–</span>{% endif %}</td>
+        <td class="num">{{ s.sent_count or '–' }}</td>
+        <td class="muted nowrap">{{ s.last_checked_at|ago }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
 </div>
 {% else %}
 <p class="empty">No shows yet. Paste a show's exhibitor list link above to start.</p>
 {% endif %}
+
+<section class="card" style="margin-top:18px">
+  <h2>Activity</h2>
+  {% if activity %}
+  <ul class="activity" style="margin-top:8px">{% for a in activity %}<li><time>{{ a.created_at|ago }}</time><span>{{ a.message }}</span></li>{% endfor %}</ul>
+  {% else %}<p class="muted" style="margin:0">Nothing yet. Activity appears here as shows are checked and outreach is prepared.</p>{% endif %}
+</section>
 {% endblock %}

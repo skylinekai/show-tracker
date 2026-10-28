@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import notify
-from .db import connect, now
+from .db import connect, log_activity, now
 from .scrapers import (
     ScrapeError,
     detect_platform,
@@ -99,24 +99,28 @@ def _check_show(show_id: int, scraper) -> dict:
             if not key or key in seen:
                 continue
             seen.add(key)
+            sqft, dims, hall = r.get("booth_sqft"), r.get("booth_dims") or "", r.get("hall") or ""
             if key in current:
                 db.execute(
                     "UPDATE exhibitors SET name = ?, booth = ?, "
                     "description = CASE WHEN ? <> '' THEN ? ELSE description END, "
                     "website = CASE WHEN ? <> '' THEN ? ELSE website END, "
                     "profile_url = CASE WHEN ? <> '' THEN ? ELSE profile_url END, "
+                    "booth_sqft = COALESCE(?, booth_sqft), "
+                    "booth_dims = CASE WHEN ? <> '' THEN ? ELSE booth_dims END, "
+                    "hall = CASE WHEN ? <> '' THEN ? ELSE hall END, "
                     "last_seen_at = ?, removed_at = NULL WHERE id = ?",
                     (r["name"], r["booth"], r["description"], r["description"], r["website"], r["website"],
-                     r["profile_url"], r["profile_url"], ts, current[key]["id"]),
+                     r["profile_url"], r["profile_url"], sqft, dims, dims, hall, hall, ts, current[key]["id"]),
                 )
             else:
                 junk = 1 if looks_like_junk(r["name"]) else 0
                 new_id = db.insert(
                     "INSERT INTO exhibitors (show_id, name, name_key, booth, description, website, profile_url, "
-                    "likely_junk, first_seen_at, last_seen_at, in_first_snapshot) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "booth_sqft, booth_dims, hall, likely_junk, first_seen_at, last_seen_at, in_first_snapshot) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (show_id, r["name"], key, r["booth"], r["description"], r["website"], r["profile_url"],
-                     junk, ts, ts, 1 if first_check else 0),
+                     sqft, dims or None, hall or None, junk, ts, ts, 1 if first_check else 0),
                 )
                 if not first_check and not junk:
                     added.append({**r, "id": new_id})
@@ -143,10 +147,27 @@ def _check_show(show_id: int, scraper) -> dict:
 
     if added:
         _push_new(show, added)
+        log_activity("new_exhibitors", f"{len(added)} new exhibitor{'s' if len(added) != 1 else ''} at {show['name']}",
+                     f"show:{show_id}")
+        _big_booth_alerts(show, added)
+    if first_check:
+        log_activity("show_added", f"Started tracking {show['name']}: {len(seen)} exhibitors", f"show:{show_id}")
     if show["platform"] == "mapyourshow" and not show["next_edition_url"]:
         _probe_next_edition(show, scraper)
 
     return {"found": len(seen), "added": len(added), "removed": removed, "first_check": first_check, "warning": warning}
+
+
+def _big_booth_alerts(show: dict, added: list[dict]) -> None:
+    from . import settings as cfg
+
+    threshold = cfg.get("big_booth_alert_sqft")
+    big = [a for a in added if a.get("booth_sqft") and a["booth_sqft"] >= threshold]
+    if big:
+        notify.big_booths(show, big)
+        with connect() as db:
+            for a in big:
+                db.execute("UPDATE exhibitors SET alerted_at = ? WHERE id = ?", (now(), a["id"]))
 
 
 def _finish_failed(show_id: int, run_id: int, msg: str) -> None:

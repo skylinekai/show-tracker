@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}My details{% endblock %}
+{% block content %}
+<h1>My details</h1>
+<p class="lede">Signed in as {{ user.email }}.</p>
+<section class="card" style="max-width:520px">
+  <h2>Change password</h2>
+  <form method="post" class="grid" style="margin-top:12px">
+    {{ csrf_field }}
+    <label class="full">Current password <input type="password" name="current" autocomplete="current-password" required></label>
+    <label class="full">New password <input type="password" name="new" minlength="8" autocomplete="new-password" required></label>
+    <div class="full"><button type="submit">Change password</button></div>
+  </form>
+</section>
+{% endblock %}

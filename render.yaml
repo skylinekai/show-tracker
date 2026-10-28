@@ -16,8 +16,18 @@ services:
         fromDatabase:
           name: show-tracker-db
           property: connectionString
-      - key: APP_PASSWORD
-        sync: false          # you'll be asked for it when you create the Blueprint
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AMPLEMARKET_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
       - key: CLAY_WEBHOOK_URL
         sync: false
       - key: SLACK_WEBHOOK_URL

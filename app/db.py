@@ -63,10 +63,115 @@ CREATE TABLE IF NOT EXISTS runs (
     removed INTEGER,
     error TEXT
 );
+CREATE TABLE IF NOT EXISTS users (
+    id {pk},
+    email TEXT NOT NULL UNIQUE,
+    name TEXT,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    last_login_at TEXT
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+CREATE TABLE IF NOT EXISTS companies (
+    id {pk},
+    name TEXT NOT NULL,
+    name_key TEXT NOT NULL UNIQUE,
+    domain TEXT,
+    linkedin_url TEXT,
+    industry TEXT,
+    size TEXT,
+    employees INTEGER,
+    revenue TEXT,
+    location TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    note TEXT,
+    researched_at TEXT
+);
+CREATE TABLE IF NOT EXISTS contacts (
+    id {pk},
+    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    am_person_id TEXT,
+    name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    title TEXT,
+    email TEXT,
+    email_status TEXT,
+    linkedin_url TEXT,
+    location TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (company_id, linkedin_url)
+);
+CREATE TABLE IF NOT EXISTS leads (
+    id {pk},
+    exhibitor_id INTEGER NOT NULL REFERENCES exhibitors(id) ON DELETE CASCADE,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    contact_id INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'review',
+    score INTEGER,
+    score_notes TEXT,
+    subject TEXT,
+    opener TEXT,
+    sequence_id TEXT,
+    send_after TEXT,
+    created_at TEXT NOT NULL,
+    approved_at TEXT,
+    approved_by TEXT,
+    sent_at TEXT,
+    error TEXT,
+    reply_label TEXT,
+    reply_snippet TEXT,
+    replied_at TEXT,
+    UNIQUE (show_id, contact_id)
+);
+CREATE TABLE IF NOT EXISTS discovered_shows (
+    id {pk},
+    name TEXT NOT NULL,
+    url TEXT,
+    website TEXT,
+    platform TEXT,
+    start_date TEXT,
+    location TEXT,
+    industry TEXT,
+    reason TEXT,
+    found_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'suggested',
+    UNIQUE (name)
+);
+CREATE TABLE IF NOT EXISTS activity (
+    id {pk},
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    ref TEXT,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS ix_exh_show ON exhibitors(show_id);
 CREATE INDEX IF NOT EXISTS ix_exh_first_seen ON exhibitors(first_seen_at);
 CREATE INDEX IF NOT EXISTS ix_runs_show ON runs(show_id);
+CREATE INDEX IF NOT EXISTS ix_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS ix_contacts_email ON contacts(email);
+CREATE INDEX IF NOT EXISTS ix_activity_created ON activity(created_at);
 """
+
+# Columns added after the first release. Added one by one so existing databases upgrade in place.
+MIGRATIONS = [
+    ("shows", "prospecting", "INTEGER NOT NULL DEFAULT 0"),
+    ("shows", "auto_send", "INTEGER NOT NULL DEFAULT 0"),
+    ("shows", "sequence_id", "TEXT"),
+    ("exhibitors", "booth_sqft", "INTEGER"),
+    ("exhibitors", "booth_dims", "TEXT"),
+    ("exhibitors", "hall", "TEXT"),
+    ("exhibitors", "company_id", "INTEGER"),
+    ("exhibitors", "score", "INTEGER"),
+    ("exhibitors", "score_notes", "TEXT"),
+    ("exhibitors", "stage", "TEXT"),
+    ("exhibitors", "alerted_at", "TEXT"),
+]
 
 
 class Conn:
@@ -123,7 +228,26 @@ def connect():
 
 def init_db() -> None:
     pk = "SERIAL PRIMARY KEY" if IS_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
-    with _lock, connect() as db:
-        for stmt in SCHEMA.format(pk=pk).split(";"):
-            if stmt.strip():
-                db.execute(stmt)
+    with _lock:
+        with connect() as db:
+            for stmt in SCHEMA.format(pk=pk).split(";"):
+                if stmt.strip():
+                    db.execute(stmt)
+        for table, column, decl in MIGRATIONS:
+            with connect() as db:
+                if column not in _columns(db, table):
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def _columns(db: Conn, table: str) -> set[str]:
+    if IS_PG:
+        rows = db.all("SELECT column_name FROM information_schema.columns WHERE table_name = ?", (table,))
+        return {r["column_name"] for r in rows}
+    return {r["name"] for r in db.all(f"PRAGMA table_info({table})")}
+
+
+def log_activity(kind: str, message: str, ref: str | None = None) -> None:
+    """Short entries for the activity feed and daily briefing."""
+    with connect() as db:
+        db.execute("INSERT INTO activity (kind, message, ref, created_at) VALUES (?, ?, ?, ?)",
+                   (kind, message[:500], ref, now()))
