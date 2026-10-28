@@ -1,0 +1,6 @@
+{"SUCCESS": true, "DATA": {"results": {"exhibitor": {"found": 4, "hit": [
+ {"id": "1001", "fields": {"exhid_l": 1001, "exhname_t": "IMO - Intelligent Medical Objects", "boothsdisplay_la": ["2341randomstring"], "exhdesc_t": "Clinical terminology platform."}},
+ {"id": "1002", "fields": {"exhid_l": 1002, "exhname_t": "OrthoDome", "boothsdisplay_la": ["1180", "1182"]}},
+ {"id": "1003", "fields": {"exhid_l": 1003, "exhname_t": "Innovation Theater", "boothsdisplay_la": ["T1"]}},
+ {"id": "1004", "fields": {"exhid_l": 1004, "exhname_t": "Tetraflon USA LLC", "boothsdisplay_la": []}}
+]}}}}

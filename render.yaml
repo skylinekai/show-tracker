@@ -1,0 +1,30 @@
+# Render Blueprint: one web service (the app plus its built-in scheduler) and a Postgres database.
+# In Render: New + -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: show-tracker
+    runtime: python
+    plan: starter            # needs to stay awake so the scheduler keeps running
+    buildCommand: pip install -r requirements.txt
+    # One worker on purpose: the scheduler lives inside the app process.
+    startCommand: gunicorn wsgi:app --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: show-tracker-db
+          property: connectionString
+      - key: APP_PASSWORD
+        sync: false          # you'll be asked for it when you create the Blueprint
+      - key: CLAY_WEBHOOK_URL
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: CHECK_INTERVAL_HOURS
+        value: "24"
+
+databases:
+  - name: show-tracker-db
+    plan: basic-256mb

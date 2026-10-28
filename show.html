@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ show.name }} · Show Tracker{% endblock %}
+{% block head %}{% if show.status == 'Checking' %}<meta http-equiv="refresh" content="4">{% endif %}{% endblock %}
+{% block content %}
+<p class="eyebrow"><a href="{{ url_for('dashboard') }}">Shows</a> // {{ show.platform_label }}</p>
+<div class="titlerow">
+  <h1>{{ show.name }}</h1>
+  <div class="actions">
+    <form method="post" action="{{ url_for('check_now', show_id=show.id) }}"><button {% if show.status == 'Checking' %}disabled{% endif %}>↻ Check now</button></form>
+    <a class="btn ghost" href="{{ url_for('export_csv', show=show.id, view=view) }}">Export CSV</a>
+  </div>
+</div>
+<p class="lede">
+  <span class="pill {{ show.status_class }}">{{ show.status }}</span>
+  {% if show.start_date %} {{ show.start_date|nicedate }}{% if show.days_until is not none and show.days_until >= 0 %} · {{ show.days_until }} days away{% endif %}{% endif %}
+  {% if show.location %} · {{ show.location }}{% endif %}
+  · checked {{ show.last_checked_at|ago }}
+  · <a href="{{ show.url }}" target="_blank" rel="noopener">source ↗</a>
+</p>
+
+{% if show.status == 'Checking' %}<p class="note">Fetching the exhibitor list… this page refreshes itself.</p>{% endif %}
+{% if show.last_error %}<p class="note {{ 'bad' if show.status_class == 'bad' else 'warn' }}">{{ show.last_error }}</p>{% endif %}
+{% if child %}<p class="note good">Next edition is live and being tracked: <a href="{{ url_for('show_page', show_id=child.id) }}">{{ child.name }}</a></p>{% endif %}
+{% if parent %}<p class="note">Found automatically when it went live, as the next edition of <a href="{{ url_for('show_page', show_id=parent.id) }}">{{ parent.name }}</a>.</p>{% endif %}
+
+<div class="filters">
+  {% set tabs = [('all', 'All', counts.all_count), ('new', 'New (' ~ window ~ 'd)', counts.new_count), ('removed', 'Dropped out', counts.removed_count), ('junk', 'Not companies', counts.junk_count)] %}
+  {% for key, label, n in tabs %}
+    <a class="chip {{ 'on' if view == key }}" href="{{ url_for('show_page', show_id=show.id, view=key, q=q or None) }}">{{ label }} <span>{{ n }}</span></a>
+  {% endfor %}
+  <form class="search" method="get"><input type="hidden" name="view" value="{{ view }}"><input name="q" value="{{ q }}" placeholder="/ search company or booth"></form>
+</div>
+
+{% if rows %}
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Company</th><th>Booth</th><th>Website</th><th>First seen</th>{% if view == 'removed' %}<th>Dropped</th>{% else %}<th>Sent to Clay</th>{% endif %}</tr></thead>
+  <tbody>
+  {% for e in rows %}
+    <tr>
+      <td class="name">{% if e.profile_url %}<a href="{{ e.profile_url }}" target="_blank" rel="noopener">{{ e.name }}</a>{% else %}{{ e.name }}{% endif %}
+        {% if not e.in_first_snapshot and not e.likely_junk %}<span class="tag">new</span>{% endif %}
+        {% if e.description %}<small class="desc">{{ e.description[:160] }}{% if e.description|length > 160 %}…{% endif %}</small>{% endif %}</td>
+      <td class="mono">{{ e.booth or '–' }}</td>
+      <td class="mono">{% if e.website %}<a href="{{ e.website if '://' in e.website else 'https://' ~ e.website }}" target="_blank" rel="noopener">{{ e.website.split('://')[-1].rstrip('/') }}</a>{% else %}–{% endif %}</td>
+      <td class="mono muted">{{ e.first_seen_at|nicedate }}</td>
+      {% if view == 'removed' %}<td class="mono muted">{{ e.removed_at|nicedate }}</td>{% else %}<td class="mono muted">{{ e.pushed_at|nicedate if e.pushed_at else '–' }}</td>{% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">{% if q %}Nothing matches “{{ q }}”.{% elif view == 'new' %}No new exhibitors in the last {{ window }} days. The first check records the baseline; anything added after that shows up here.{% elif show.last_checked_at %}Nothing here.{% else %}Not checked yet.{% endif %}</p>
+{% endif %}
+
+<div class="split">
+  <section>
+    <h2>Check history</h2>
+    <table class="compact">
+      <thead><tr><th>When</th><th class="num">Found</th><th class="num">Added</th><th class="num">Dropped</th><th>Note</th></tr></thead>
+      <tbody>
+      {% for r in runs %}
+        <tr><td class="mono muted">{{ r.started_at|ago }}</td><td class="num mono">{{ r.found if r.found is not none else '–' }}</td>
+          <td class="num mono">{{ r.added or 0 }}</td><td class="num mono">{{ r.removed or 0 }}</td><td class="muted">{{ r.error or '' }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">No checks yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Show details</h2>
+    <form method="post" action="{{ url_for('edit_show', show_id=show.id) }}" class="editform">
+      <label>Name <input name="name" value="{{ show.name }}"></label>
+      <label>Date <input name="start_date" type="date" value="{{ (show.start_date or '')[:10] }}"></label>
+      <label>Location <input name="location" value="{{ show.location or '' }}"></label>
+      <label>Exhibitor list link <input name="url" value="{{ show.url }}"></label>
+      <button type="submit">Save</button>
+    </form>
+    <div class="danger">
+      <form method="post" action="{{ url_for('toggle_show', show_id=show.id) }}"><button class="ghost">{{ 'Pause tracking' if show.active else 'Resume tracking' }}</button></form>
+      <form method="post" action="{{ url_for('delete_show', show_id=show.id) }}" onsubmit="return confirm('Delete this show and its exhibitor history?')"><button class="ghost bad">Delete show</button></form>
+    </div>
+  </section>
+</div>
+{% endblock %}
